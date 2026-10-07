@@ -33,6 +33,12 @@ CITY_JOB_LINKS = {
 
 DEFAULT_LINK = CITY_JOB_LINKS["quezon"]
 
+# These answers are the same on every Foundever questionnaire.
+FIXED_FOUNDEVER_ANSWERS = {
+    "preferred_work_setup": "On-Site",
+    "employee_referral_name": "XRP - EDWARD BELACSE",
+}
+
 def get_job_link(city_str):
     if not city_str:
         return DEFAULT_LINK
@@ -176,7 +182,10 @@ def run_foundever_pipeline():
         job_url = get_job_link(candidate['city'])
         print(
             f"Row {r_idx} ({ws.title}): {candidate['first_name']} {candidate['last_name']} "
-            f"is ready for the Foundever questionnaire at {job_url}. Sheet left blank for review."
+            f"is ready for the Foundever questionnaire at {job_url}. "
+            f"Work setup {FIXED_FOUNDEVER_ANSWERS['preferred_work_setup']}. "
+            f"Referral {FIXED_FOUNDEVER_ANSWERS['employee_referral_name']}. "
+            "Sheet left blank for review."
         )
 
 if __name__ == "__main__":
