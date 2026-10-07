@@ -286,9 +286,10 @@ def phone_key(phone_str):
 
 def validate_email(email_str):
     email = str(email_str or "").strip()
-    if not email or any(ch in email for ch in " ,") or "@" not in email:
+    if not email or any(ch in email for ch in " ,;/"):
         return None
-    if email.lower().endswith("g,ail.com"):
+    # Require a domain label before the dot so values like name@.gmail.com are held for review.
+    if not re.fullmatch(r"[^@\s]+@[^@\s.][^@\s]*\.[^@\s]+", email):
         return None
     return email
 
@@ -767,12 +768,14 @@ def load_candidates(doc):
             phone = phone_key(cell(row, phone_idx))
             full_name = f"{cell(row, first_idx)} {cell(row, last_idx)}".strip().lower()
             if remark:
-                if email:
-                    existing.add(("email", email))
-                if phone:
-                    existing.add(("phone", phone))
-                if full_name:
-                    existing.add(("name", full_name))
+                # A not-interested or invalid row is not an existing Foundever application.
+                if remark.strip().lower() not in {"executive team / n", "invalid", "no", "n"}:
+                    if email:
+                        existing.add(("email", email))
+                    if phone:
+                        existing.add(("phone", phone))
+                    if full_name:
+                        existing.add(("name", full_name))
                 continue
             if not cell(row, first_idx) and not cell(row, last_idx) and not email:
                 continue

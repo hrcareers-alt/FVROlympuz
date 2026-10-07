@@ -21,4 +21,5 @@ if ! flock -n 9; then
   exit 0
 fi
 
+export PYTHONUNBUFFERED=1
 "${VENV_PY}" foundever_automation.py
