@@ -5,7 +5,6 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright
 
 load_dotenv()
 
@@ -138,66 +137,47 @@ def run_foundever_pipeline():
 
     print(f"Found {len(rows_to_process)} candidate rows for processing.")
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context()
+    for candidate in rows_to_process:
+        ws = candidate['worksheet']
+        r_idx = candidate['row_idx']
+        c_idx = candidate['fvr_col_idx']
 
-        for candidate in rows_to_process:
-            ws = candidate['worksheet']
-            r_idx = candidate['row_idx']
-            c_idx = candidate['fvr_col_idx']
+        # Double check cell isn't filled
+        current_val = ws.cell(r_idx, c_idx).value or ""
+        if current_val.strip():
+            continue
 
-            # Double check cell isn't filled
-            current_val = ws.cell(r_idx, c_idx).value or ""
-            if current_val.strip():
-                continue
+        pref = candidate['pref'].lower()
+        if "foundever" not in pref and "all of the above" not in pref:
+            ws.update_cell(r_idx, c_idx, "Executive Team / N")
+            print(f"Row {r_idx} ({ws.title}): Not interested in Foundever -> Executive Team / N")
+            continue
 
-            pref = candidate['pref'].lower()
-            if "foundever" not in pref and "all of the above" not in pref:
-                ws.update_cell(r_idx, c_idx, "Executive Team / N")
-                print(f"Row {r_idx} ({ws.title}): Not interested in Foundever -> Executive Team / N")
-                continue
+        email = validate_email(candidate['email'])
+        phone = candidate['phone']
+        full_name = f"{candidate['first_name']} {candidate['last_name']}".strip().lower()
 
-            email = validate_email(candidate['email'])
-            phone = candidate['phone']
-            full_name = f"{candidate['first_name']} {candidate['last_name']}".strip().lower()
+        if not email:
+            print(f"Row {r_idx} ({ws.title}): Invalid email format -> Skipped for review")
+            continue
 
-            if not email:
-                print(f"Row {r_idx} ({ws.title}): Invalid email format -> Skipped for review")
-                continue
+        if email.lower() in existing_records or phone in existing_records or full_name in existing_records:
+            ws.update_cell(r_idx, c_idx, "Existing Applicant")
+            print(f"Row {r_idx} ({ws.title}): Duplicate detected -> Existing Applicant")
+            continue
 
-            if email.lower() in existing_records or phone in existing_records or full_name in existing_records:
-                ws.update_cell(r_idx, c_idx, "Existing Applicant")
-                print(f"Row {r_idx} ({ws.title}): Duplicate detected -> Existing Applicant")
-                continue
+        if candidate['city'].lower() in ["n/a", "na", "abroad"]:
+            ws.update_cell(r_idx, c_idx, "INVALID")
+            print(f"Row {r_idx} ({ws.title}): Invalid/Abroad location -> INVALID")
+            continue
 
-            if candidate['city'].lower() in ["n/a", "na", "abroad"]:
-                ws.update_cell(r_idx, c_idx, "INVALID")
-                print(f"Row {r_idx} ({ws.title}): Invalid/Abroad location -> INVALID")
-                continue
-
-            # Submit via Playwright
-            job_url = get_job_link(candidate['city'])
-            page = context.new_page()
-            try:
-                print(f"Submitting {candidate['first_name']} {candidate['last_name']} to {job_url}")
-                page.goto(job_url, timeout=60000)
-                page.wait_for_load_state("networkidle")
-                
-                # Form filling step
-                # Note: Adapt exact selectors based on target Maki form layout
-                
-                ws.update_cell(r_idx, c_idx, "Executive Team / Y")
-                existing_records.add(email.lower())
-                existing_records.add(phone)
-                existing_records.add(full_name)
-                print(f"Successfully submitted Row {r_idx} ({ws.title}) -> Executive Team / Y")
-            except Exception as e:
-                print(f"Failed submission for Row {r_idx} ({ws.title}): {e}")
-            finally:
-                page.close()
-
-        browser.close()
+        # The Foundever questionnaire is filled on the Maki assessment.
+        # Do not stamp the sheet as submitted until that questionnaire is confirmed.
+        job_url = get_job_link(candidate['city'])
+        print(
+            f"Row {r_idx} ({ws.title}): {candidate['first_name']} {candidate['last_name']} "
+            f"is ready for the Foundever questionnaire at {job_url}. Sheet left blank for review."
+        )
 
 if __name__ == "__main__":
     run_foundever_pipeline()
