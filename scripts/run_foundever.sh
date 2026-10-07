@@ -12,4 +12,13 @@ fi
 CRED_FILE="$(bash "${ROOT}/scripts/prepare_credentials.sh")"
 export GOOGLE_APPLICATION_CREDENTIALS="${CRED_FILE}"
 cd "${ROOT}"
-exec "${VENV_PY}" foundever_automation.py
+
+LOCK_FILE="${HOME}/.config/fvrolympuz/foundever_automation.lock"
+mkdir -p "$(dirname "${LOCK_FILE}")"
+exec 9>"${LOCK_FILE}"
+if ! flock -n 9; then
+  echo "Foundever automation is already running."
+  exit 0
+fi
+
+"${VENV_PY}" foundever_automation.py
