@@ -340,7 +340,7 @@ def map_education(edu, birth_year):
         if word in text:
             year = f"{word} Year College level Completed"
             break
-    if text in {"college graduate", "bachelor's degree", "bachelors degree", "college education"}:
+    if text in {"college graduate", "college grad", "bachelor's degree", "bachelors degree", "college education"}:
         return "Bachelor's degree or equivalent", "4th Year College level Completed", "Not Applicable"
     if "college" in text and "undergrad" in text or text == "college":
         return undergrad, year or "Not Applicable", "Not Applicable"
@@ -1032,6 +1032,8 @@ def check_mapping():
     graduated = map_education("College Graduate", 2002)
     if graduated[0] != "Bachelor's degree or equivalent" or graduated[1] != "4th Year College level Completed":
         raise RuntimeError(f"college graduate mapping {graduated}")
+    if map_education("College Grad", 2002) != graduated:
+        raise RuntimeError("college grad must map like college graduate")
     if local_phone("9813257775") != "09813257775":
         raise RuntimeError("phone normalization failed")
     if REFERRAL_NAME != "XRP - Edward Belacse" or WORK_SETUP != "On-Site":
