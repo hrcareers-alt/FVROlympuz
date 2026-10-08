@@ -22,4 +22,5 @@ if ! flock -n 9; then
 fi
 
 export PYTHONUNBUFFERED=1
+export TZ=Asia/Manila
 "${VENV_PY}" foundever_automation.py

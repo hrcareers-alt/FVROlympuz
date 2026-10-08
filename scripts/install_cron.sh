@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Install the Foundever hourly job.
-# Manila time (Asia/Manila, UTC+8): minute 09, from 8:09 AM through 12:09 AM.
-# 1:09 AM through 7:09 AM are outside the window.
+# The host clock is UTC. Manila is UTC+8 with no daylight saving, and this
+# cron does not apply CRON_TZ, so the hours below are UTC:
+#   00:09 UTC = 8:09 AM Manila
+#   16:09 UTC = 12:09 AM Manila
+# 1:09 AM through 7:09 AM Manila (17:09–23:09 UTC) stay outside the window.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,9 +17,8 @@ touch "${LOG_FILE}"
 chmod 600 "${LOG_FILE}"
 
 crontab - <<EOF
-CRON_TZ=Asia/Manila
-9 0,8-23 * * * ${RUNNER} >> ${LOG_FILE} 2>&1
+9 0-16 * * * ${RUNNER} >> ${LOG_FILE} 2>&1
 EOF
 
-echo "Installed Foundever cron for Asia/Manila hours 0,8-23 at minute 09."
+echo "Installed Foundever cron for 8:09 AM through 12:09 AM Manila (UTC hours 0-16, minute 09)."
 crontab -l
