@@ -180,6 +180,16 @@ def _place_index():
 PLACE_INDEX = _place_index()
 
 
+def _phrase_in_place(sheet, phrase, city=False):
+    """True when phrase is a whole place name. 'Davao Region' is not Davao City."""
+    pattern = rf"(^| ){re.escape(phrase)}( |$)"
+    for match in re.finditer(pattern, sheet):
+        if city and re.match(r" (region|province)( |$)", sheet[match.end():]):
+            continue
+        return True
+    return False
+
+
 def _direct_match(sheet, said_city):
     best = None
     best_key = None
@@ -190,7 +200,7 @@ def _direct_match(sheet, said_city):
         exact = sheet == label_norm
         if exact:
             score = 2000 + len(label_norm)
-        elif re.search(rf"(^| ){re.escape(label_norm)}( |$)", sheet):
+        elif _phrase_in_place(sheet, label_norm, city=_is_city_label(label)):
             score = 1000 + len(label_norm)
         else:
             continue
@@ -988,13 +998,18 @@ def check_mapping():
         "Taytay, Rizal": "Rizal",
         "Taytay, Palawan": "Palawan",
         "Bacolod, Lanao del Norte": "Lanao del Norte",
+        "Tagum City": "Davao del Norte",
+        "Tagum City, Davao Region": "Davao del Norte",
+        "Quezon Province": "Quezon",
+        "Maasim Sarangani Province": "Sarangani",
+        "SANTO NIÑO (FAIRE)": "Cagayan",
     }
     unresolved = [
         "Hagonoy", "San Fernando", "Rosario", "San Mateo", "Talisay", "Taytay",
         "Pilar", "San Miguel", "Bato", "Looc", "Magsaysay", "Tudela",
         "San Francisco", "San Quintin", "Valencia", "Liloan", "Calamba",
         "Sta. Rosa", "Santa Rosa", "San Juan", "Compostela", "Talisay City",
-        "San Fernando City",
+        "San Fernando City", "Santo Niño",
     ]
     for raw, expected in samples.items():
         found = match_place(raw)

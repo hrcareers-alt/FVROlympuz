@@ -212,6 +212,8 @@ class PlaceIndex:
                 gram = " ".join(words[start:start + size])
                 if gram == "quezon" and start + size < len(words) and words[start + size] == "city":
                     continue
+                if index is self.munis and start + size < len(words) and words[start + size] in {"region", "province"}:
+                    continue
                 item = index.get(gram)
                 if item is None:
                     continue
@@ -292,6 +294,15 @@ class PlaceIndex:
             if not filtered:
                 return Resolve(ambiguous=True, core=groups[0][0].core, blocked=True)
             groups = filtered
+        if len(groups) > 1:
+            common = None
+            for group in groups:
+                codes = {mun.code for mun in group}
+                common = codes if common is None else common & codes
+            if common and len(common) == 1:
+                code = next(iter(common))
+                chosen = next(mun for group in groups for mun in group if mun.code == code)
+                groups = [[chosen]]
         if groups:
             munis = self._narrow(groups, words, occupied)
             found = self._from_munis(munis, text, said_city)
