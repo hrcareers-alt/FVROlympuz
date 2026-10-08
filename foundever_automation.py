@@ -133,6 +133,7 @@ _PLACE_REWRITES = (
     ("gensan", "general santos"),
     ("cdo", "cagayan de oro"),
     ("alabang", "muntinlupa"),
+    ("meycauyan", "meycauayan"),
 )
 
 
@@ -1003,6 +1004,7 @@ def check_mapping():
         "Quezon Province": "Quezon",
         "Maasim Sarangani Province": "Sarangani",
         "SANTO NIÑO (FAIRE)": "Cagayan",
+        "Meycauyan": "Bulacan",
     }
     unresolved = [
         "Hagonoy", "San Fernando", "Rosario", "San Mateo", "Talisay", "Taytay",
