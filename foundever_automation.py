@@ -3,7 +3,7 @@ import os
 import re
 import time
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import gspread
 import requests
@@ -312,6 +312,10 @@ def parse_dob(value):
     text = str(value or "").strip()
     if not text:
         return None
+    if re.fullmatch(r"\d{5}", text):
+        serial = int(text)
+        if 20000 <= serial <= 55000:
+            return date(1899, 12, 30) + timedelta(days=serial)
     for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%d/%m/%Y"):
         try:
             return datetime.strptime(text[:10] if fmt == "%Y-%m-%d" else text, fmt).date()
@@ -320,7 +324,16 @@ def parse_dob(value):
     try:
         return date.fromisoformat(text[:10])
     except ValueError:
-        return None
+        pass
+    written = re.sub(r"[.]", " ", text).replace(",", ", ")
+    written = re.sub(r"\s+", " ", written).strip()
+    written = re.sub(r"\bsept\b", "Sep", written, flags=re.IGNORECASE)
+    for fmt in ("%b %d, %Y", "%b %d %Y", "%B %d, %Y", "%B %d %Y"):
+        try:
+            return datetime.strptime(written, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 def age_on(born, today):
@@ -343,7 +356,9 @@ def map_education(edu, birth_year):
             break
     if text in {"college graduate", "college grad", "bachelor's degree", "bachelors degree", "college education"}:
         return "Bachelor's degree or equivalent", "4th Year College level Completed", "Not Applicable"
-    if "college" in text and "undergrad" in text or text == "college":
+    if "senor high" in text or "senior high" in text or "shs" in text:
+        return "Senior Highschool", "Not Applicable", "Not Applicable"
+    if re.fullmatch(r"[1-5](st|nd|rd|th) year( college)?", text) or "college" in text:
         return undergrad, year or "Not Applicable", "Not Applicable"
     if "associate" in text and "computer" in text:
         return "Some College or Associate/ Trade Degree", "2nd Year College level Completed", "Other Technology"
@@ -353,8 +368,6 @@ def map_education(edu, birth_year):
         return "Highschool Diploma or equivalent (Old HS Curriculum)", "Not Applicable", "Not Applicable"
     if "als" in text:
         return "Highschool Diploma or equivalent", "Not Applicable", "Not Applicable"
-    if "shs" in text or "senior high" in text:
-        return "Senior Highschool", "Not Applicable", "Not Applicable"
     if "high school" in text:
         return high_school, "Not Applicable", "Not Applicable"
     if text in {"others", "other"}:
@@ -368,16 +381,20 @@ def map_education(edu, birth_year):
 
 def map_bpo(bpo):
     text = re.sub(r"\s+", " ", str(bpo or "").strip().lower())
-    if text in {"", "none", "n/a", "na", "no", "no experience", "fresh graduate"}:
+    if (
+        text in {"", "none", "n/a", "na", "no", "no experience", "fresh graduate"}
+        or "no bpo" in text
+        or "no exp" in text
+    ):
         return "Not Applicable", "No Call Center Experience", "Not Applicable"
     if any(token in text for token in ("1 - 5", "1-5", "1 to 5")):
         duration = "1 to 6 Months"
     elif any(token in text for token in ("6 - 11", "6-11", "6 to 11")):
         duration = "6 Months to 1 Year"
-    elif "1 year" in text:
-        duration = "Over 1 Year"
-    elif any(token in text for token in ("2 year", "3 year", "4 year", "5 year")):
+    elif re.search(r"\b([2-9]|\d{2,})\s*(years?|yrs?)\b", text):
         duration = "Over 2 Years"
+    elif "1 year" in text or "1 and half" in text or "1.5" in text:
+        duration = "Over 1 Year"
     else:
         return None
     return (
@@ -1031,6 +1048,21 @@ def check_mapping():
         raise RuntimeError("blank BPO must map to no call center experience")
     if map_bpo("3 Years & Above")[1] != "Over 2 Years":
         raise RuntimeError("3 years of BPO must map to Over 2 Years")
+    if map_bpo("BPO 7 years")[1] != "Over 2 Years" or map_bpo("5yrs")[1] != "Over 2 Years":
+        raise RuntimeError("multi-year BPO must map to Over 2 Years")
+    if map_bpo("1 and half year BPO experience")[1] != "Over 1 Year":
+        raise RuntimeError("one and a half years of BPO must map to Over 1 Year")
+    if map_bpo("No BPO exp")[1] != "No Call Center Experience":
+        raise RuntimeError("no BPO experience must stay no experience")
+    third_year = map_education("3rd Year College", 2004)
+    if third_year[1] != "3rd Year College level Completed":
+        raise RuntimeError(f"3rd year college mapping {third_year}")
+    if map_education("4th year", 2003)[1] != "4th Year College level Completed":
+        raise RuntimeError("4th year must map to 4th year college")
+    if parse_dob("Sept. 14,1985") != date(1985, 9, 14) or parse_dob("Nov.14, 1989") != date(1989, 11, 14):
+        raise RuntimeError("written birthdates failed")
+    if parse_dob("36534") != date(1899, 12, 30) + timedelta(days=36534):
+        raise RuntimeError("sheet serial birthdate failed")
     graduated = map_education("College Graduate", 2002)
     if graduated[0] != "Bachelor's degree or equivalent" or graduated[1] != "4th Year College level Completed":
         raise RuntimeError(f"college graduate mapping {graduated}")
