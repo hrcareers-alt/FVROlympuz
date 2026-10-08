@@ -10,6 +10,8 @@ import requests
 from google.oauth2.service_account import Credentials
 from gspread.utils import rowcol_to_a1
 
+from philippine_places import BARE_CITY_CORES, norm_place, resolve_place
+
 # Hourly runner: Asia/Manila minute :09, 8:09 AM through 12:09 AM.
 # 1:09 AM through 7:09 AM are outside that window (see scripts/install_cron.sh).
 
@@ -118,93 +120,53 @@ PLACE_GROUPS = [
     ]),
 ]
 
-# Municipality or typo -> official city/province label. Used only when the text
-# does not already name a province or city in PLACE_GROUPS.
-PLACE_ALIASES = {
-    "alabang": "City of Muntinlupa",
-    "amadeo": "Cavite",
-    "angeles": "City of Angeles",
-    "angeles coty": "City of Angeles",
-    "antipolo": "Rizal",
-    "bacarra": "Ilocos Norte",
-    "baguio": "City of Baguio",
-    "basud": "Camarines Norte",
-    "bayugan": "Agusan del Sur",
-    "binan": "Laguna",
-    "bukindon": "Bukidnon",
-    "caba": "La Union",
-    "baybay": "Leyte",
-    "cabadbaran": "Agusan del Norte",
-    "cabuyao": "Laguna",
-    "marawi": "Lanao del Sur",
-    "cagayab de oro": "City of Cagayan de Oro",
-    "calamba": "Laguna",
-    "camrines sur": "Camarines Sur",
-    "cdo": "City of Cagayan de Oro",
-    "consolacion": "Cebu",
-    "cordova": "Cebu",
-    "dagupan": "Pangasinan",
-    "dinalupihan": "Bataan",
-    "dipolog": "Zamboanga del Norte",
-    "dumaguete": "Negros Oriental",
-    "e samar": "Eastern Samar",
-    "gensan": "City of General Santos",
-    "gingoog": "Misamis Oriental",
-    "glan": "Sarangani",
-    "ilagan": "Isabela",
-    "imus": "Cavite",
-    "koronadal": "South Cotabato",
-    "ligao": "Albay",
-    "liloan": "Cebu",
-    "los banos": "Laguna",
-    "macabebe": "Pampanga",
-    "mabalacat": "Pampanga",
-    "mati": "Davao Oriental",
-    "metro manila": "Quezon City",
-    "mexico": "Pampanga",
-    "midsayap": "Cotabato",
-    "montalban": "Rizal",
-    "oroquieta": "Misamis Occidental",
-    "ozamiz": "Misamis Occidental",
-    "pagadian": "Zamboanga del Sur",
-    "palo": "Leyte",
-    "panabo": "Davao del Norte",
-    "polomolok": "South Cotabato",
-    "porac": "Pampanga",
-    "poro": "Cebu",
-    "qc": "Quezon City",
-    "rodriquez": "Rizal",
-    "rodriguez": "Rizal",
-    "bamban": "Tarlac",
-    "bangar": "La Union",
-    "bauan": "Batangas",
-    "binangonan": "Rizal",
-    "binalonan": "Pangasinan",
-    "oslob": "Cebu",
-    "piat": "Cagayan",
-    "san jose del monte": "Bulacan",
-    "santa rosa": "Laguna",
-    "surigao city": "Surigao del Norte",
-    "tagaytay": "Cavite",
-    "talisay": "Cebu",
-    "tandag": "Surigao del Sur",
-    "tanza": "Cavite",
-    "taytay": "Rizal",
-    "trece martires": "Cavite",
-    "valencia": "Bukidnon",
-}
+# Sheet typos and short forms that are not official PSGC names.
+_PLACE_REWRITES = (
+    ("cagayab de oro", "cagayan de oro"),
+    ("angeles coty", "angeles"),
+    ("gen santos", "general santos"),
+    ("e samar", "eastern samar"),
+    ("camrines", "camarines"),
+    ("bukindon", "bukidnon"),
+    ("rodriquez", "rodriguez"),
+    ("montalban", "rodriguez"),
+    ("gensan", "general santos"),
+    ("cdo", "cagayan de oro"),
+    ("alabang", "muntinlupa"),
+)
 
 
 def _norm_place(value):
-    text = str(value or "").lower().replace("ñ", "n").replace("帽", "n")
-    text = text.replace("’", "'")
-    text = re.sub(r"[^a-z0-9 ]+", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    text = re.sub(r"^city of ", "", text)
-    text = text.replace("quezon city", "quezoncity")
-    text = re.sub(r"\bcity\b", " ", text)
-    text = text.replace("quezoncity", "quezon city")
-    return re.sub(r"\s+", " ", text).strip()
+    return norm_place(value)
+
+
+def _is_city_label(label):
+    return label.startswith("City of") or label.endswith(" City") or label == "Pateros"
+
+
+def _prepare_place(raw):
+    said_city = bool(re.search(r"\bcity\b", str(raw or ""), flags=re.IGNORECASE))
+    sheet = _norm_place(raw)
+    ncr = False
+    if sheet in {"metro manila", "qc"}:
+        return "quezon city", said_city, False
+    if "metro manila" in sheet:
+        ncr = True
+        sheet = re.sub(r"(^| )metro manila( |$)", " ", sheet)
+    sheet = re.sub(r"\b(brgy|barangay|bgy)\b", " ", sheet)
+    for source, target in _PLACE_REWRITES:
+        sheet = re.sub(
+            rf"(^| ){re.escape(source)}( |$)",
+            lambda match, replacement=target: f"{match.group(1)}{replacement}{match.group(2)}",
+            sheet,
+        )
+    sheet = re.sub(r"(^| )sta( |$)", r"\1santa\2", sheet)
+    sheet = re.sub(r"(^| )sto( |$)", r"\1santo\2", sheet)
+    sheet = re.sub(r"(^| )qc( |$)", r"\1quezon city\2", sheet)
+    sheet = re.sub(r"\s+", " ", sheet).strip()
+    if not sheet and ncr:
+        return "quezon city", said_city, False
+    return sheet, said_city, ncr
 
 
 def _place_index():
@@ -218,45 +180,73 @@ def _place_index():
 PLACE_INDEX = _place_index()
 
 
-def match_place(raw):
-    """Return (label, region, zip) for a sheet location, or None."""
-    sheet = _norm_place(raw)
-    if not sheet:
-        return None
+def _direct_match(sheet, said_city):
     best = None
     best_key = None
     for label, info in PLACE_INDEX.items():
         label_norm = info["norm"]
         if not label_norm:
             continue
-        if sheet == label_norm:
+        exact = sheet == label_norm
+        if exact:
             score = 2000 + len(label_norm)
         elif re.search(rf"(^| ){re.escape(label_norm)}( |$)", sheet):
             score = 1000 + len(label_norm)
         else:
             continue
-        city_pref = 1 if label.startswith("City of") or label.endswith(" City") else 0
-        if sheet == label_norm:
-            key = (score, city_pref, len(label))
+        city = _is_city_label(label)
+        if exact and (said_city or label_norm in BARE_CITY_CORES):
+            city_pref = 1 if city else 0
+        elif exact:
+            city_pref = 0 if city else 1
         else:
-            key = (score, -city_pref, len(label))
+            city_pref = -1 if city else 0
+        key = (score, city_pref, len(label))
         if best_key is None or key > best_key:
             best_key = key
             best = label
-    alias_best = None
-    alias_key = None
-    for alias, label in PLACE_ALIASES.items():
-        alias_norm = _norm_place(alias)
-        if sheet == alias_norm or re.search(rf"(^| ){re.escape(alias_norm)}( |$)", sheet):
-            key = (800 + len(alias_norm), len(alias_norm))
-            if alias_key is None or key > alias_key:
-                alias_key = key
-                alias_best = label
-    if best is not None and (alias_key is None or best_key[0] >= alias_key[0]):
-        chosen = best
-    elif alias_best is not None:
-        chosen = alias_best
-    else:
+    return best
+
+
+def _choose_label(sheet, direct, found):
+    if found.blocked:
+        return None
+    if found.ambiguous:
+        if not direct or not found.core:
+            return None
+        direct_norm = PLACE_INDEX[direct]["norm"]
+        if direct_norm == found.core:
+            return None
+        return direct
+    psgc = found.label
+    if psgc and direct:
+        if psgc == direct:
+            return direct
+        direct_norm = PLACE_INDEX[direct]["norm"]
+        psgc_norm = PLACE_INDEX[psgc]["norm"]
+        if sheet == direct_norm:
+            return direct
+        if sheet == psgc_norm:
+            return psgc
+        if _is_city_label(psgc) and not _is_city_label(direct):
+            if psgc_norm and direct_norm.startswith(psgc_norm + " "):
+                return direct
+            return psgc
+        if len(direct_norm) >= len(psgc_norm):
+            return direct
+        return psgc
+    return psgc or direct
+
+
+def match_place(raw):
+    """Return (label, region, zip) for a sheet location, or None."""
+    sheet, said_city, ncr = _prepare_place(raw)
+    if not sheet:
+        return None
+    direct = _direct_match(sheet, said_city)
+    found = resolve_place(sheet, list(PLACE_INDEX), said_city=said_city, ncr_only=ncr)
+    chosen = _choose_label(sheet, direct, found)
+    if not chosen:
         return None
     info = PLACE_INDEX[chosen]
     return chosen, info["region"], info["zip"]
@@ -929,13 +919,21 @@ def check_mapping():
         "Quezon City": "Quezon City",
         "Candelaria Quezon": "Quezon",
         "Bacolod City": "City of Bacolod",
+        "Bacolod": "City of Bacolod",
         "Maalas-as, Rosario, Batangas": "Batangas",
+        "Maalas-as, Rosario": "Batangas",
         "Dolores, Eastern Samar": "Eastern Samar",
         "Tanza, Cavite": "Cavite",
         "Angeles coty": "City of Angeles",
+        "Angeles City, Pampanga": "City of Angeles",
         "Talisay Batangas": "Batangas",
+        "Talisay, Cebu": "Cebu",
         "Ilagan City Isabela": "Isabela",
+        "Isabela": "Isabela",
+        "City of Isabela": "City of Isabela",
         "Cebu": "City of Cebu",
+        "Manila": "City of Manila",
+        "Davao": "City of Davao",
         "Davao City, Davao Del Sur": "Davao del Sur",
         "Parañaque City": "City of Parañaque",
         "Binangonan": "Rizal",
@@ -943,11 +941,75 @@ def check_mapping():
         "Santa Rosa City": "Laguna",
         "Bauan, Batangas": "Batangas",
         "BAMBAN": "Tarlac",
+        "Noveleta": "Cavite",
+        "Baybay": "Leyte",
+        "Cabuyao": "Laguna",
+        "Piat": "Cagayan",
+        "Bangar": "La Union",
+        "Binalonan": "Pangasinan",
+        "Baguio": "City of Baguio",
+        "Baguio City": "City of Baguio",
+        "qc": "Quezon City",
+        "metro manila": "Quezon City",
+        "Compostela Valley": "Davao de Oro",
+        "North Cotabato": "Cotabato",
+        "Western Samar": "Samar",
+        "Maguindanao": "Maguindanao del Norte",
+        "Maguindanao del Sur": "Maguindanao del Sur",
+        "Intramuros": "City of Manila",
+        "Mandaluyong": "City of Mandaluyong",
+        "Pateros": "Pateros",
+        "Alabang": "City of Muntinlupa",
+        "San Fernando, Pampanga": "Pampanga",
+        "San Fernando, La Union": "La Union",
+        "San Mateo, Rizal": "Rizal",
+        "San Mateo, Isabela": "Isabela",
+        "San Miguel, Bulacan": "Bulacan",
+        "Imus": "Cavite",
+        "Tagaytay": "Cavite",
+        "Calamba, Laguna": "Laguna",
+        "Calamba City": "Laguna",
+        "Biñan": "Laguna",
+        "Rodriguez": "Rizal",
+        "montalban": "Rizal",
+        "cdo": "City of Cagayan de Oro",
+        "gensan": "City of General Santos",
+        "bukindon": "Bukidnon",
+        "e samar": "Eastern Samar",
+        "Iloilo": "City of Iloilo",
+        "Pasig City": "City of Pasig",
+        "Sta. Rosa City": "Laguna",
+        "Santa Rosa, Laguna": "Laguna",
+        "San Juan, Metro Manila": "City of San Juan",
+        "San Juan, Batangas": "Batangas",
+        "Hagonoy, Bulacan": "Bulacan",
+        "Hagonoy, Davao del Sur": "Davao del Sur",
+        "Rosario, Batangas": "Batangas",
+        "Taytay, Rizal": "Rizal",
+        "Taytay, Palawan": "Palawan",
+        "Bacolod, Lanao del Norte": "Lanao del Norte",
     }
+    unresolved = [
+        "Hagonoy", "San Fernando", "Rosario", "San Mateo", "Talisay", "Taytay",
+        "Pilar", "San Miguel", "Bato", "Looc", "Magsaysay", "Tudela",
+        "San Francisco", "San Quintin", "Valencia", "Liloan", "Calamba",
+        "Sta. Rosa", "Santa Rosa", "San Juan", "Compostela", "Talisay City",
+        "San Fernando City",
+    ]
     for raw, expected in samples.items():
         found = match_place(raw)
         if not found or found[0] != expected:
             raise RuntimeError(f"place match {raw!r} -> {found} expected {expected}")
+    for raw in unresolved:
+        found = match_place(raw)
+        if found:
+            raise RuntimeError(f"place match {raw!r} should stay unresolved, got {found}")
+    baguio = match_place("Baguio")
+    if baguio[1] != "Cordillera Administrative Region (CAR)" or baguio[2] != "2600":
+        raise RuntimeError(f"Baguio must stay on the Baguio city row, got {baguio}")
+    angeles = match_place("Angeles City, Pampanga")
+    if angeles[2] != "2009":
+        raise RuntimeError(f"Angeles must use the Angeles zip, got {angeles}")
     if map_bpo("")[1] != "No Call Center Experience":
         raise RuntimeError("blank BPO must map to no call center experience")
     if map_bpo("3 Years & Above")[1] != "Over 2 Years":
