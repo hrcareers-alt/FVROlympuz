@@ -133,7 +133,10 @@ PLACE_ALIASES = {
     "binan": "Laguna",
     "bukindon": "Bukidnon",
     "caba": "La Union",
+    "baybay": "Leyte",
     "cabadbaran": "Agusan del Norte",
+    "cabuyao": "Laguna",
+    "marawi": "Lanao del Sur",
     "cagayab de oro": "City of Cagayan de Oro",
     "calamba": "Laguna",
     "camrines sur": "Camarines Sur",
@@ -172,7 +175,17 @@ PLACE_ALIASES = {
     "qc": "Quezon City",
     "rodriquez": "Rizal",
     "rodriguez": "Rizal",
+    "bamban": "Tarlac",
+    "bangar": "La Union",
+    "bauan": "Batangas",
+    "binangonan": "Rizal",
+    "binalonan": "Pangasinan",
+    "oslob": "Cebu",
+    "piat": "Cagayan",
     "san jose del monte": "Bulacan",
+    "santa rosa": "Laguna",
+    "surigao city": "Surigao del Norte",
+    "tagaytay": "Cavite",
     "talisay": "Cebu",
     "tandag": "Surigao del Sur",
     "tanza": "Cavite",
@@ -716,6 +729,24 @@ def find_header(headers, predicate):
     return None
 
 
+def preference_column(headers, rows):
+    """Preferred-company column. Modern Traction's header was cleared, but the values remain."""
+    named = find_header(headers, lambda h: "preferred bpo" in h or "endorse to" in h)
+    if named is not None:
+        return named
+    work_idx = find_header(headers, lambda h: "work set" in h)
+    if work_idx is None or work_idx == 0 or headers[work_idx - 1].strip():
+        return None
+    blank_idx = work_idx - 1
+    for row in rows[1:40]:
+        if blank_idx >= len(row):
+            continue
+        sample = row[blank_idx].lower()
+        if any(token in sample for token in ("foundever", "all of the above", "transcom", "concentrix", "teleperformance")):
+            return blank_idx
+    return None
+
+
 def setup_gspread():
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
@@ -737,7 +768,7 @@ def load_candidates(doc):
         headers = [header.strip() for header in data[0]]
         lowered = [header.lower() for header in headers]
         fvr_idx = find_header(headers, lambda h: h in {"foundever", "fvr"})
-        pref_idx = find_header(headers, lambda h: "preferred bpo" in h or "endorse to" in h)
+        pref_idx = preference_column(headers, data)
         email_idx = find_header(headers, lambda h: "email" in h and "address" not in h)
         phone_idx = find_header(headers, lambda h: "mobile" in h or "phone" in h or "contact" in h)
         first_idx = find_header(headers, lambda h: h == "first name")
@@ -907,6 +938,11 @@ def check_mapping():
         "Cebu": "City of Cebu",
         "Davao City, Davao Del Sur": "Davao del Sur",
         "Parañaque City": "City of Parañaque",
+        "Binangonan": "Rizal",
+        "Oslob": "Cebu",
+        "Santa Rosa City": "Laguna",
+        "Bauan, Batangas": "Batangas",
+        "BAMBAN": "Tarlac",
     }
     for raw, expected in samples.items():
         found = match_place(raw)
