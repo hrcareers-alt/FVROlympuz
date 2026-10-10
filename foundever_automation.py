@@ -134,6 +134,9 @@ _PLACE_REWRITES = (
     ("cdo", "cagayan de oro"),
     ("alabang", "muntinlupa"),
     ("meycauyan", "meycauayan"),
+    ("lapulapucity", "lapu lapu"),
+    ("lapulapu", "lapu lapu"),
+    ("ozamiz", "ozamis"),
 )
 
 
@@ -168,6 +171,23 @@ def _prepare_place(raw):
     if not sheet and ncr:
         return "quezon city", said_city, False
     return sheet, said_city, ncr
+
+
+_FOREIGN_MARKERS = (
+    "kuala lumpur",
+    "hong kong",
+    "malaysia",
+    "singapore",
+    "india",
+    "dubai",
+)
+
+
+def _is_foreign_place(raw):
+    text = _norm_place(raw)
+    if not text:
+        return False
+    return any(re.search(rf"(^| ){re.escape(marker)}( |$)", text) for marker in _FOREIGN_MARKERS)
 
 
 def _place_index():
@@ -341,7 +361,8 @@ def age_on(born, today):
 
 
 def map_education(edu, birth_year):
-    text = re.sub(r"\s+", " ", str(edu or "").strip().lower().replace("’", "'"))
+    text = re.sub(r"[’'`´]", "'", str(edu or "").strip().lower())
+    text = re.sub(r"\s+", " ", text.replace("colleage", "college").replace("colloge", "college"))
     k12 = birth_year is None or birth_year >= 1999
     undergrad = "College undergraduate (K-12 Curriculum)" if k12 else "College Undergraduate (Old HS Curriculum)"
     high_school = (
@@ -354,11 +375,17 @@ def map_education(edu, birth_year):
         if word in text:
             year = f"{word} Year College level Completed"
             break
-    if text in {"college graduate", "college grad", "bachelor's degree", "bachelors degree", "college education"}:
+    if (
+        text in {"college graduate", "college grad", "bachelor's degree", "bachelors degree", "bachelor graduate", "college education", "graduate"}
+        or text.startswith("college graduate")
+        or text.startswith("bachelor")
+    ):
         return "Bachelor's degree or equivalent", "4th Year College level Completed", "Not Applicable"
-    if "senor high" in text or "senior high" in text or "shs" in text:
+    if "senor high" in text or "senior high" in text or "shs" in text or "grade 12" in text:
         return "Senior Highschool", "Not Applicable", "Not Applicable"
-    if re.fullmatch(r"[1-5](st|nd|rd|th) year( college)?", text) or "college" in text:
+    if "comptech" in text or ("computer" in text and "graduate" in text):
+        return "Some College or Associate/ Trade Degree", "2nd Year College level Completed", "Other Technology"
+    if "undergrad" in text or re.fullmatch(r"[1-5](st|nd|rd|th) year( college)?", text) or "college" in text:
         return undergrad, year or "Not Applicable", "Not Applicable"
     if "associate" in text and "computer" in text:
         return "Some College or Associate/ Trade Degree", "2nd Year College level Completed", "Other Technology"
@@ -368,7 +395,7 @@ def map_education(edu, birth_year):
         return "Highschool Diploma or equivalent (Old HS Curriculum)", "Not Applicable", "Not Applicable"
     if "als" in text:
         return "Highschool Diploma or equivalent", "Not Applicable", "Not Applicable"
-    if "high school" in text:
+    if "highschool" in text or "high school" in text:
         return high_school, "Not Applicable", "Not Applicable"
     if text in {"others", "other"}:
         return "Other higher level of education", "Not Applicable", "Not Applicable"
@@ -391,8 +418,16 @@ def map_bpo(bpo):
         duration = "1 to 6 Months"
     elif any(token in text for token in ("6 - 11", "6-11", "6 to 11")):
         duration = "6 Months to 1 Year"
-    elif re.search(r"\b([2-9]|\d{2,})\s*(years?|yrs?)\b", text):
-        duration = "Over 2 Years"
+    elif (year_hit := re.search(r"(?<!\d)(\d+)\s*\+?\s*(?:years?|yrs?|yeard)\b", text)):
+        duration = "Over 2 Years" if int(year_hit.group(1)) >= 2 else "Over 1 Year"
+    elif (month_hit := re.search(r"\b(\d+)\s*(?:months?|mos)\b", text)):
+        months = int(month_hit.group(1))
+        if months <= 5:
+            duration = "1 to 6 Months"
+        elif months <= 11:
+            duration = "6 Months to 1 Year"
+        else:
+            duration = "Over 1 Year"
     elif "1 year" in text or "1 and half" in text or "1.5" in text:
         duration = "Over 1 Year"
     else:
@@ -864,7 +899,7 @@ def load_candidates(doc):
                 continue
             for key in keys:
                 existing.add(key)
-            if record["city"].strip().lower() in {"n/a", "na", "abroad"}:
+            if record["city"].strip().lower() in {"n/a", "na", "abroad"} or _is_foreign_place(record["city"]):
                 remarks.append((*target, "INVALID"))
                 continue
             place = match_place(record["city"])
@@ -1022,6 +1057,10 @@ def check_mapping():
         "Maasim Sarangani Province": "Sarangani",
         "SANTO NIÑO (FAIRE)": "Cagayan",
         "Meycauyan": "Bulacan",
+        "Ozamiz City": "Misamis Occidental",
+        "Cagayan de oro city Misamis orientaL": "City of Cagayan de Oro",
+        "Cagayan de Oro City, Misamis Oriental": "City of Cagayan de Oro",
+        "lapulapucity": "City of Lapu-Lapu",
     }
     unresolved = [
         "Hagonoy", "San Fernando", "Rosario", "San Mateo", "Talisay", "Taytay",
@@ -1068,6 +1107,40 @@ def check_mapping():
         raise RuntimeError(f"college graduate mapping {graduated}")
     if map_education("College Grad", 2002) != graduated:
         raise RuntimeError("college grad must map like college graduate")
+    if map_education("colleage graduate, MBA ongoing", 2002) != graduated:
+        raise RuntimeError("college typo with ongoing MBA must stay a bachelor's degree")
+    if map_education("Colloge Graduate", 2002) != graduated or map_education("Bachelor Graduate", 2002) != graduated:
+        raise RuntimeError("college and bachelor graduate typos must map like college graduate")
+    if map_education("Graduate", 2002) != graduated or map_education("Bachelor’s", 2002) != graduated:
+        raise RuntimeError("plain graduate and bachelor's must map like college graduate")
+    second_year = map_education("2nd yr undergrad", 2004)
+    if second_year[1] != "2nd Year College level Completed":
+        raise RuntimeError(f"2nd year undergrad mapping {second_year}")
+    if map_education("3rd year undergraduate", 2004)[1] != "3rd Year College level Completed":
+        raise RuntimeError("3rd year undergraduate must map to 3rd year college")
+    if map_education("Highschool Graduate", 2004)[0] != "High school diploma or equivalent (K-12 Curriculum)":
+        raise RuntimeError("one-word highschool must map to a high school diploma")
+    if map_education("Grade 12 (current)", 2006)[0] != "Senior Highschool":
+        raise RuntimeError("grade 12 must map to senior highschool")
+    comptech = map_education("2 years graduate of Comptech", 2001)
+    if comptech != ("Some College or Associate/ Trade Degree", "2nd Year College level Completed", "Other Technology"):
+        raise RuntimeError(f"comptech mapping {comptech}")
+    if map_bpo("8 months")[1] != "6 Months to 1 Year" or map_bpo("10 months")[1] != "6 Months to 1 Year":
+        raise RuntimeError("8 to 11 months of BPO must map to 6 Months to 1 Year")
+    if map_bpo("2 months")[1] != "1 to 6 Months" or map_bpo("TELCO ,BPO 5MOS TELCO ACCOUNT")[1] != "1 to 6 Months":
+        raise RuntimeError("short month counts must map to 1 to 6 Months")
+    if map_bpo("1year and 10 months")[1] != "Over 1 Year":
+        raise RuntimeError("one year plus months must map to Over 1 Year")
+    if map_bpo("8 yeard")[1] != "Over 2 Years" or map_bpo("8+ years")[1] != "Over 2 Years":
+        raise RuntimeError("multi-year typos must map to Over 2 Years")
+    if map_bpo("branch manager") is not None or map_bpo("Concentrix Philippines/customer service representative") is not None:
+        raise RuntimeError("a job title without a duration must stay unmapped")
+    if not _is_foreign_place("kuala lumpur") or not _is_foreign_place("Visakhapatnam, india"):
+        raise RuntimeError("obvious foreign cities must be recognized")
+    if _is_foreign_place("Cagayan de Oro") or _is_foreign_place("Quezon City"):
+        raise RuntimeError("Philippine places must not be treated as foreign")
+    if parse_dob("5776") is not None or parse_dob("N/A") is not None:
+        raise RuntimeError("short numbers and N/A must stay unusable birthdates")
     if local_phone("9813257775") != "09813257775":
         raise RuntimeError("phone normalization failed")
     if REFERRAL_NAME != "XRP - Edward Belacse" or WORK_SETUP != "On-Site":

@@ -201,6 +201,13 @@ class PlaceIndex:
             return "Maguindanao del Norte"
         return prov.label
 
+    def _longer_municipality(self, words, start, size):
+        limit = min(len(words), start + 8)
+        for end in range(start + size + 1, limit + 1):
+            if " ".join(words[start:end]) in self.munis:
+                return True
+        return False
+
     def _hits(self, words, index, occupied=None, ncr_only=False):
         occupied = list(occupied) if occupied is not None else [False] * len(words)
         found = []
@@ -213,6 +220,8 @@ class PlaceIndex:
                 if gram == "quezon" and start + size < len(words) and words[start + size] == "city":
                     continue
                 if index is self.munis and start + size < len(words) and words[start + size] in {"region", "province"}:
+                    continue
+                if index is self.provinces and self._longer_municipality(words, start, size):
                     continue
                 item = index.get(gram)
                 if item is None:
