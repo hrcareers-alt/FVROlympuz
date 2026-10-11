@@ -375,6 +375,8 @@ def map_education(edu, birth_year):
         if word in text:
             year = f"{word} Year College level Completed"
             break
+    if ("pursuing" in text or "ongoing" in text) and "graduate" not in text and ("bachelor" in text or "college" in text):
+        return undergrad, year or "Not Applicable", "Not Applicable"
     if (
         text in {"college graduate", "college grad", "bachelor's degree", "bachelors degree", "bachelor graduate", "college education", "graduate"}
         or text.startswith("college graduate")
@@ -1061,13 +1063,15 @@ def check_mapping():
         "Cagayan de oro city Misamis orientaL": "City of Cagayan de Oro",
         "Cagayan de Oro City, Misamis Oriental": "City of Cagayan de Oro",
         "lapulapucity": "City of Lapu-Lapu",
+        "Ormoc City": "Leyte",
+        "Matina": "City of Davao",
     }
     unresolved = [
         "Hagonoy", "San Fernando", "Rosario", "San Mateo", "Talisay", "Taytay",
         "Pilar", "San Miguel", "Bato", "Looc", "Magsaysay", "Tudela",
         "San Francisco", "San Quintin", "Valencia", "Liloan", "Calamba",
         "Sta. Rosa", "Santa Rosa", "San Juan", "Compostela", "Talisay City",
-        "San Fernando City", "Santo Niño",
+        "San Fernando City", "Santo Niño", "Negros",
     ]
     for raw, expected in samples.items():
         found = match_place(raw)
@@ -1080,6 +1084,9 @@ def check_mapping():
     baguio = match_place("Baguio")
     if baguio[1] != "Cordillera Administrative Region (CAR)" or baguio[2] != "2600":
         raise RuntimeError(f"Baguio must stay on the Baguio city row, got {baguio}")
+    matinabus = match_place("Matinabus")
+    if matinabus and matinabus[0] == "City of Davao":
+        raise RuntimeError("Matinabus must not collapse into Davao")
     angeles = match_place("Angeles City, Pampanga")
     if angeles[2] != "2009":
         raise RuntimeError(f"Angeles must use the Angeles zip, got {angeles}")
@@ -1107,6 +1114,9 @@ def check_mapping():
         raise RuntimeError(f"college graduate mapping {graduated}")
     if map_education("College Grad", 2002) != graduated:
         raise RuntimeError("college grad must map like college graduate")
+    pursuing = map_education("Currently Pursuing Bachelor Science in Hospital Management at ACLC ORMOC", 2008)
+    if pursuing[0] != "College undergraduate (K-12 Curriculum)" or pursuing[1] != "Not Applicable":
+        raise RuntimeError(f"a bachelor's still being pursued must stay undergraduate, got {pursuing}")
     if map_education("colleage graduate, MBA ongoing", 2002) != graduated:
         raise RuntimeError("college typo with ongoing MBA must stay a bachelor's degree")
     if map_education("Colloge Graduate", 2002) != graduated or map_education("Bachelor Graduate", 2002) != graduated:

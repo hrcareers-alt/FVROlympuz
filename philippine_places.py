@@ -156,6 +156,7 @@ class PlaceIndex:
                     self._add_muni(alt_key, mun)
 
         counted = {}
+        stems = {}
         with (DATA_DIR / "Barangay.csv").open(encoding="utf-8-sig", newline="") as handle:
             for row in csv.DictReader(handle):
                 key = norm_place(_strip_paren(row["brgyDesc"]))
@@ -164,9 +165,18 @@ class PlaceIndex:
                 code = row["citymunCode"].strip()
                 self.barangays.setdefault(code, []).append(key)
                 counted.setdefault(key, set()).add(code)
+                first = key.split()[0]
+                if len(first) >= 6 and first != key:
+                    stems.setdefault(first, {}).setdefault(code, 0)
+                    stems[first][code] += 1
         for key, codes in counted.items():
             if len(key) >= 8 and len(codes) == 1:
                 self.unique_barangay[key] = next(iter(codes))
+        # A district name such as Matina is several barangays in one city.
+        self.shared_stem = {}
+        for word, by_code in stems.items():
+            if sum(by_code.values()) >= 2 and len(by_code) == 1:
+                self.shared_stem[word] = next(iter(by_code))
 
     def _city_label(self, core, is_city):
         if not is_city:
@@ -330,6 +340,14 @@ class PlaceIndex:
                     label = self._label_for(mun, text)
                     if label:
                         return Resolve(label)
+            if len(words) == 1:
+                code = self.shared_stem.get(words[0])
+                if code:
+                    mun = self.mun_by_code.get(code)
+                    if mun is not None:
+                        label = self._label_for(mun, text)
+                        if label:
+                            return Resolve(label)
         return Resolve()
 
 
