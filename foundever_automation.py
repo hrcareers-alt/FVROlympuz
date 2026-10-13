@@ -424,7 +424,8 @@ def map_education(edu, birth_year):
 
 
 def map_bpo(bpo):
-    text = re.sub(r"\s+", " ", str(bpo or "").strip().lower())
+    text = re.sub(r"[()]", " ", str(bpo or "").strip().lower())
+    text = re.sub(r"\s+", " ", text).strip()
     if (
         text in {"", "none", "n/a", "na", "no", "no experience", "fresh graduate"}
         or "no bpo" in text
@@ -1152,7 +1153,7 @@ def check_mapping():
     angeles = match_place("Angeles City, Pampanga")
     if angeles[2] != "2009":
         raise RuntimeError(f"Angeles must use the Angeles zip, got {angeles}")
-    if map_bpo("")[1] != "No Call Center Experience":
+    if map_bpo("")[1] != "No Call Center Experience" or map_bpo("(N/A)")[1] != "No Call Center Experience":
         raise RuntimeError("blank BPO must map to no call center experience")
     if map_bpo("3 Years & Above")[1] != "Over 2 Years":
         raise RuntimeError("3 years of BPO must map to Over 2 Years")
