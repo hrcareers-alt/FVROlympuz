@@ -133,11 +133,12 @@ _PLACE_REWRITES = (
     ("gensan", "general santos"),
     ("cdo", "cagayan de oro"),
     ("alabang", "muntinlupa"),
-    ("meycauyan", "meycauayan"),
-    ("lapulapucity", "lapu lapu"),
-    ("lapulapu", "lapu lapu"),
-    ("ozamiz", "ozamis"),
-)
+        ("meycauyan", "meycauayan"),
+        ("lapulapucity", "lapu lapu"),
+        ("lapulapu", "lapu lapu"),
+        ("ozamiz", "ozamis"),
+        ("n samar", "northern samar"),
+    )
 
 
 def _norm_place(value):
@@ -348,6 +349,14 @@ def parse_dob(value):
     written = re.sub(r"[.]", " ", text).replace(",", ", ")
     written = re.sub(r"\s+", " ", written).strip()
     written = re.sub(r"\bsept\b", "Sep", written, flags=re.IGNORECASE)
+    written = re.sub(r"\baprol\b", "April", written, flags=re.IGNORECASE)
+    piped = re.sub(r"[|]", " ", text)
+    piped = re.sub(r"\s+", " ", piped).strip()
+    for fmt in ("%m %d %Y", "%m %d %y"):
+        try:
+            return datetime.strptime(piped, fmt).date()
+        except ValueError:
+            continue
     for fmt in ("%b %d, %Y", "%b %d %Y", "%B %d, %Y", "%B %d %Y"):
         try:
             return datetime.strptime(written, fmt).date()
@@ -383,11 +392,17 @@ def map_education(edu, birth_year):
         or text.startswith("bachelor")
     ):
         return "Bachelor's degree or equivalent", "4th Year College level Completed", "Not Applicable"
-    if "senor high" in text or "senior high" in text or "shs" in text or "grade 12" in text:
+    if "senor high" in text or "senior high" in text or "shs" in text or "grade 12" in text or (
+        ("k-12" in text or "k12" in text or "academic strand" in text)
+        and "college" not in text
+        and "bachelor" not in text
+    ):
         return "Senior Highschool", "Not Applicable", "Not Applicable"
     if "comptech" in text or ("computer" in text and "graduate" in text):
         return "Some College or Associate/ Trade Degree", "2nd Year College level Completed", "Other Technology"
     if "undergrad" in text or re.fullmatch(r"[1-5](st|nd|rd|th) year( college)?", text) or "college" in text:
+        return undergrad, year or "Not Applicable", "Not Applicable"
+    if re.search(r"\b[1-5](st|nd|rd|th) year\b", text) and "high" not in text:
         return undergrad, year or "Not Applicable", "Not Applicable"
     if "associate" in text and "computer" in text:
         return "Some College or Associate/ Trade Degree", "2nd Year College level Completed", "Other Technology"
@@ -397,7 +412,7 @@ def map_education(edu, birth_year):
         return "Highschool Diploma or equivalent (Old HS Curriculum)", "Not Applicable", "Not Applicable"
     if "als" in text:
         return "Highschool Diploma or equivalent", "Not Applicable", "Not Applicable"
-    if "highschool" in text or "high school" in text:
+    if "highschool" in text or "high school" in text or text in {"hs", "hs grad", "hs graduate"} or text.startswith("hs grad"):
         return high_school, "Not Applicable", "Not Applicable"
     if text in {"others", "other"}:
         return "Other higher level of education", "Not Applicable", "Not Applicable"
@@ -430,6 +445,8 @@ def map_bpo(bpo):
             duration = "6 Months to 1 Year"
         else:
             duration = "Over 1 Year"
+    elif re.search(r"\bone month\b", text):
+        duration = "1 to 6 Months"
     elif "1 year" in text or "1 and half" in text or "1.5" in text:
         duration = "Over 1 Year"
     else:
@@ -784,6 +801,42 @@ def find_header(headers, predicate):
     return None
 
 
+def _looks_like_phone(value):
+    digits = re.sub(r"\D", "", str(value or ""))
+    if digits.startswith("63") and len(digits) >= 12:
+        digits = digits[2:]
+    digits = digits.lstrip("0")
+    return len(digits) == 10 and digits.startswith("9")
+
+
+def phone_column(headers, rows):
+    """Phone column. Valid Consent's header was overwritten, but the numbers remain."""
+    named = find_header(headers, lambda h: "mobile" in h or "phone" in h or "contact" in h)
+    if named is not None:
+        return named
+    best = None
+    best_hits = 0
+    for index, header in enumerate(headers):
+        label = header.strip().lower()
+        if any(token in label for token in ("email", "birth", "name", "educat", "bpo", "endorse", "location", "city", "status")):
+            continue
+        hits = 0
+        seen = 0
+        for row in rows[1:80]:
+            if index >= len(row):
+                continue
+            value = row[index].strip()
+            if not value:
+                continue
+            seen += 1
+            if _looks_like_phone(value):
+                hits += 1
+        if seen >= 8 and hits >= seen * 0.8 and hits > best_hits:
+            best = index
+            best_hits = hits
+    return best
+
+
 def preference_column(headers, rows):
     """Preferred-company column. Modern Traction's header was cleared, but the values remain."""
     named = find_header(headers, lambda h: "preferred bpo" in h or "endorse to" in h)
@@ -825,7 +878,7 @@ def load_candidates(doc):
         fvr_idx = find_header(headers, lambda h: h in {"foundever", "fvr"})
         pref_idx = preference_column(headers, data)
         email_idx = find_header(headers, lambda h: "email" in h and "address" not in h)
-        phone_idx = find_header(headers, lambda h: "mobile" in h or "phone" in h or "contact" in h)
+        phone_idx = phone_column(headers, data)
         first_idx = find_header(headers, lambda h: h == "first name")
         last_idx = find_header(headers, lambda h: h == "last name")
         city_idx = find_header(headers, lambda h: "city" in h or h == "location")
@@ -1065,13 +1118,17 @@ def check_mapping():
         "lapulapucity": "City of Lapu-Lapu",
         "Ormoc City": "Leyte",
         "Matina": "City of Davao",
+        "Cebu City, Cebu": "Cebu",
+        "San Rafael tarlac city": "Tarlac",
+        "Brgy.San roque Cuidad Cebu city": "Cebu",
+        "San Isidro N Samar": "Northern Samar",
     }
     unresolved = [
         "Hagonoy", "San Fernando", "Rosario", "San Mateo", "Talisay", "Taytay",
         "Pilar", "San Miguel", "Bato", "Looc", "Magsaysay", "Tudela",
         "San Francisco", "San Quintin", "Valencia", "Liloan", "Calamba",
         "Sta. Rosa", "Santa Rosa", "San Juan", "Compostela", "Talisay City",
-        "San Fernando City", "Santo Niño", "Negros",
+        "San Fernando City", "Santo Niño", "Negros", "San Isidro", "San Rafael",
     ]
     for raw, expected in samples.items():
         found = match_place(raw)
@@ -1132,6 +1189,18 @@ def check_mapping():
         raise RuntimeError("one-word highschool must map to a high school diploma")
     if map_education("Grade 12 (current)", 2006)[0] != "Senior Highschool":
         raise RuntimeError("grade 12 must map to senior highschool")
+    if map_education("HS", 2003)[0] != "High school diploma or equivalent (K-12 Curriculum)":
+        raise RuntimeError("HS must map to a high school diploma")
+    if map_education("HS Grad", 2003)[0] != "High school diploma or equivalent (K-12 Curriculum)":
+        raise RuntimeError("HS Grad must map to a high school diploma")
+    if map_education("K-12 graduate", 2004)[0] != "Senior Highschool":
+        raise RuntimeError("K-12 graduate must map to senior highschool")
+    if map_education("General academic strand", 2005)[0] != "Senior Highschool":
+        raise RuntimeError("an academic strand must map to senior highschool")
+    if map_education("2nd year second sem.", 2004)[1] != "2nd Year College level Completed":
+        raise RuntimeError("2nd year second sem must map to 2nd year college")
+    if parse_dob("08| 31| 2001") != date(2001, 8, 31) or parse_dob("aprol 17 2000") != date(2000, 4, 17):
+        raise RuntimeError("piped and misspelled birthdates failed")
     comptech = map_education("2 years graduate of Comptech", 2001)
     if comptech != ("Some College or Associate/ Trade Degree", "2nd Year College level Completed", "Other Technology"):
         raise RuntimeError(f"comptech mapping {comptech}")
@@ -1139,6 +1208,8 @@ def check_mapping():
         raise RuntimeError("8 to 11 months of BPO must map to 6 Months to 1 Year")
     if map_bpo("2 months")[1] != "1 to 6 Months" or map_bpo("TELCO ,BPO 5MOS TELCO ACCOUNT")[1] != "1 to 6 Months":
         raise RuntimeError("short month counts must map to 1 to 6 Months")
+    if map_bpo("Cashier/teller and center agent for one month only")[1] != "1 to 6 Months":
+        raise RuntimeError("one month of experience must map to 1 to 6 Months")
     if map_bpo("1year and 10 months")[1] != "Over 1 Year":
         raise RuntimeError("one year plus months must map to Over 1 Year")
     if map_bpo("8 yeard")[1] != "Over 2 Years" or map_bpo("8+ years")[1] != "Over 2 Years":
@@ -1153,6 +1224,10 @@ def check_mapping():
         raise RuntimeError("short numbers and N/A must stay unusable birthdates")
     if local_phone("9813257775") != "09813257775":
         raise RuntimeError("phone normalization failed")
+    phone_headers = ["Last Name", "First Name", "x`", "Location", "Email"]
+    phone_rows = [phone_headers] + [["Lumawag", "Regine", "9157137260", "Negros", "a@b.com"] for _ in range(10)]
+    if phone_column(phone_headers, phone_rows) != 2:
+        raise RuntimeError("a renamed phone column must still be found from the numbers")
     if REFERRAL_NAME != "XRP - Edward Belacse" or WORK_SETUP != "On-Site":
         raise RuntimeError("standing questionnaire answers changed")
 

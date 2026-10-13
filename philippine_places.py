@@ -297,6 +297,11 @@ class PlaceIndex:
             return Resolve()
         words = text.split()
         prov_hits, prov_occupied = self._hits(words, self.provinces, ncr_only=False)
+        unique_provinces = []
+        for prov in prov_hits:
+            if prov not in unique_provinces:
+                unique_provinces.append(prov)
+        prov_hits = unique_provinces
         if len(prov_hits) > 1:
             return Resolve(ambiguous=True, blocked=True)
         province = prov_hits[0] if prov_hits else None
@@ -311,8 +316,9 @@ class PlaceIndex:
                 if kept:
                     filtered.append(kept)
             if not filtered:
-                return Resolve(ambiguous=True, core=groups[0][0].core, blocked=True)
-            groups = filtered
+                groups = []
+            else:
+                groups = filtered
         if len(groups) > 1:
             common = None
             for group in groups:
