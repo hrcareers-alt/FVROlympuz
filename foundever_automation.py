@@ -939,6 +939,11 @@ def load_candidates(doc):
                 "bpo": cell(row, bpo_idx),
                 "edu": cell(row, edu_idx),
             }
+            if not record["last_name"]:
+                parts = record["first_name"].split()
+                if len(parts) >= 2:
+                    record["last_name"] = parts[-1]
+                    record["first_name"] = " ".join(parts[:-1])
             valid_email = validate_email(record["email"])
             if not valid_email:
                 skipped.append((sheet_name, row_number, "invalid email", record["email"]))
