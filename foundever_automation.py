@@ -886,7 +886,9 @@ def load_candidates(doc):
         dob_idx = find_header(headers, lambda h: "birthdate" in h)
         bpo_idx = find_header(headers, lambda h: ("bpo" in h or "callcenter" in h or "call center" in h) and "preferred" not in h and "endorse" not in h)
         edu_idx = find_header(headers, lambda h: "educat" in h)
-        agree_idx = find_header(headers, lambda h: h.startswith("i agr") or h.startswith("i agree"))
+        agree_idx = find_header(
+            headers, lambda h: h.startswith("i agr") or h.startswith("i agree") or h == "consent"
+        )
         if sheet_name == "MYNIMO" and agree_idx is None:
             raise RuntimeError("MYNIMO is missing the agreement column")
         required = {
