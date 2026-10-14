@@ -17,7 +17,7 @@ from philippine_places import BARE_CITY_CORES, norm_place, resolve_place
 
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1NoRX955F0dpxMReiC-6lcd3hgxFDccS3H9hzabTQghE/edit"
 SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "service_account.json")
-TARGET_TABS = ["MODERN TRACTION", "JOBSTREET", "VALID CONSENT - TP, FVR & EXL"]
+TARGET_TABS = ["MODERN TRACTION", "JOBSTREET", "VALID CONSENT - TP, FVR & EXL", "MYNIMO"]
 GQL = "https://backend.makipeople.com/v1/graphql"
 MANILA_INVITATION = "1935866c-ed92-42cd-8ef8-7308dc96048c"
 RUN_LOG = os.path.expanduser("~/.config/fvrolympuz/foundever_run.jsonl")
@@ -886,6 +886,9 @@ def load_candidates(doc):
         dob_idx = find_header(headers, lambda h: "birthdate" in h)
         bpo_idx = find_header(headers, lambda h: ("bpo" in h or "callcenter" in h or "call center" in h) and "preferred" not in h and "endorse" not in h)
         edu_idx = find_header(headers, lambda h: "educat" in h)
+        agree_idx = find_header(headers, lambda h: h.startswith("i agr") or h.startswith("i agree"))
+        if sheet_name == "MYNIMO" and agree_idx is None:
+            raise RuntimeError("MYNIMO is missing the agreement column")
         required = {
             "foundever": fvr_idx, "preference": pref_idx, "email": email_idx, "phone": phone_idx,
             "first": first_idx, "last": last_idx, "city": city_idx, "birthdate": dob_idx,
@@ -924,6 +927,9 @@ def load_candidates(doc):
             target = (worksheet, row_number, fvr_idx + 1)
             if not interested:
                 remarks.append((*target, "Executive Team / N"))
+                continue
+            if agree_idx is not None and "agree" not in cell(row, agree_idx).lower():
+                skipped.append((sheet_name, row_number, "missing agreement", cell(row, agree_idx)))
                 continue
             record = {
                 "worksheet": worksheet,
@@ -1128,6 +1134,12 @@ def check_mapping():
         "San Rafael tarlac city": "Tarlac",
         "Brgy.San roque Cuidad Cebu city": "Cebu",
         "San Isidro N Samar": "Northern Samar",
+        "Cebu City": "City of Cebu",
+        "Toledo city": "Cebu",
+        "Consolacion Cebu": "Cebu",
+        "Mandaue": "City of Mandaue",
+        "Mandaue City": "City of Mandaue",
+        "Tarlac City": "Tarlac",
     }
     unresolved = [
         "Hagonoy", "San Fernando", "Rosario", "San Mateo", "Talisay", "Taytay",
@@ -1155,8 +1167,20 @@ def check_mapping():
         raise RuntimeError(f"Angeles must use the Angeles zip, got {angeles}")
     if map_bpo("")[1] != "No Call Center Experience" or map_bpo("(N/A)")[1] != "No Call Center Experience":
         raise RuntimeError("blank BPO must map to no call center experience")
-    if map_bpo("3 Years & Above")[1] != "Over 2 Years":
+    if map_bpo("3 Years & Above")[1] != "Over 2 Years" or map_bpo("2 Years & Above")[1] != "Over 2 Years":
         raise RuntimeError("3 years of BPO must map to Over 2 Years")
+    if map_bpo("1 Year & Above")[1] != "Over 1 Year":
+        raise RuntimeError("1 year and above must map to Over 1 Year")
+    if map_bpo("6 - 11 Months")[1] != "6 Months to 1 Year" or map_bpo("1 - 5 Months")[1] != "1 to 6 Months":
+        raise RuntimeError("ranged BPO months must map to the Foundever duration bands")
+    if map_bpo("None")[1] != "No Call Center Experience":
+        raise RuntimeError("None must map to no call center experience")
+    if map_education("SHS / HS Grad", 2001)[0] != "Senior Highschool":
+        raise RuntimeError("SHS / HS Grad must map to senior highschool")
+    if map_education("Vocational", 1993)[0] != "Some College or Associate/ Trade Degree":
+        raise RuntimeError("vocational must map to some college")
+    if "MYNIMO" not in TARGET_TABS:
+        raise RuntimeError("MYNIMO must stay on the hourly Foundever run")
     if map_bpo("BPO 7 years")[1] != "Over 2 Years" or map_bpo("5yrs")[1] != "Over 2 Years":
         raise RuntimeError("multi-year BPO must map to Over 2 Years")
     if map_bpo("1 and half year BPO experience")[1] != "Over 1 Year":
@@ -1283,7 +1307,7 @@ def run_foundever_pipeline():
     skip_counts = defaultdict(int)
     for item in skipped:
         skip_counts[item[2]] += 1
-        if item[2] in {"unmatched city", "unmapped education", "unmapped bpo", "unusable birthdate"}:
+        if item[2] in {"unmatched city", "unmapped education", "unmapped bpo", "unusable birthdate", "missing agreement"}:
             print(f"Skip {item[0]} row {item[1]}: {item[2]} {item[3]!r}")
     print("Skip summary:", dict(skip_counts))
     remark_counts = defaultdict(int)
