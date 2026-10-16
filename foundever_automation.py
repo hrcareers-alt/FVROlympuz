@@ -186,6 +186,8 @@ _FOREIGN_MARKERS = (
     "makurdi",
     "port harcourt",
     "vietnam",
+    "jakarta",
+    "indonesia",
 )
 
 
@@ -1267,6 +1269,8 @@ def check_mapping():
         raise RuntimeError("Nigeria locations must be recognized as foreign")
     if not _is_foreign_place("Vietnam"):
         raise RuntimeError("Vietnam must be recognized as foreign")
+    if not _is_foreign_place("Jakarta Id") or not _is_foreign_place("Indonesia"):
+        raise RuntimeError("Indonesia locations must be recognized as foreign")
     if match_place("Taytay Rizql") != match_place("Taytay, Rizal"):
         raise RuntimeError("Taytay Rizql must match Taytay, Rizal")
     if _is_foreign_place("Cagayan de Oro") or _is_foreign_place("Quezon City"):
