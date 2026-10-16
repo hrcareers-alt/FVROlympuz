@@ -138,6 +138,7 @@ _PLACE_REWRITES = (
         ("lapulapu", "lapu lapu"),
         ("ozamiz", "ozamis"),
         ("n samar", "northern samar"),
+        ("rizql", "rizal"),
     )
 
 
@@ -181,6 +182,9 @@ _FOREIGN_MARKERS = (
     "singapore",
     "india",
     "dubai",
+    "nigeria",
+    "makurdi",
+    "port harcourt",
 )
 
 
@@ -974,7 +978,13 @@ def load_candidates(doc):
             place = match_place(record["city"])
             if not place:
                 city_text = record["city"] or ""
-                if not re.search(r"[a-zA-Z]", city_text) or re.fullmatch(r"[A-Za-z]\d+", city_text.strip()):
+                bare = city_text.strip().lower()
+                if (
+                    not re.search(r"[a-zA-Z]", city_text)
+                    or re.fullmatch(r"[A-Za-z]\d+", city_text.strip())
+                    or bare == "city"
+                    or "@" in city_text
+                ):
                     remarks.append((*target, "INVALID"))
                 else:
                     skipped.append((sheet_name, row_number, "unmatched city", record["city"]))
@@ -1250,6 +1260,10 @@ def check_mapping():
         raise RuntimeError("a job title without a duration must stay unmapped")
     if not _is_foreign_place("kuala lumpur") or not _is_foreign_place("Visakhapatnam, india"):
         raise RuntimeError("obvious foreign cities must be recognized")
+    if not _is_foreign_place("Nigeria") or not _is_foreign_place("Makurdi") or not _is_foreign_place("Port Harcourt, Nigeria"):
+        raise RuntimeError("Nigeria locations must be recognized as foreign")
+    if match_place("Taytay Rizql") != match_place("Taytay, Rizal"):
+        raise RuntimeError("Taytay Rizql must match Taytay, Rizal")
     if _is_foreign_place("Cagayan de Oro") or _is_foreign_place("Quezon City"):
         raise RuntimeError("Philippine places must not be treated as foreign")
     if parse_dob("5776") is not None or parse_dob("N/A") is not None:
@@ -1309,7 +1323,7 @@ def run_foundever_pipeline():
     skip_counts = defaultdict(int)
     for item in skipped:
         skip_counts[item[2]] += 1
-        if item[2] in {"unmatched city", "unmapped education", "unmapped bpo", "unusable birthdate", "missing agreement"}:
+        if item[2] in {"unmatched city", "unmapped education", "unmapped bpo", "unusable birthdate", "missing agreement", "unusable phone"}:
             print(f"Skip {item[0]} row {item[1]}: {item[2]} {item[3]!r}")
     print("Skip summary:", dict(skip_counts))
     remark_counts = defaultdict(int)
