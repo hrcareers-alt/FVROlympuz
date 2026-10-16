@@ -185,6 +185,7 @@ _FOREIGN_MARKERS = (
     "nigeria",
     "makurdi",
     "port harcourt",
+    "vietnam",
 )
 
 
@@ -984,6 +985,8 @@ def load_candidates(doc):
                     or re.fullmatch(r"[A-Za-z]\d+", city_text.strip())
                     or bare == "city"
                     or "@" in city_text
+                    or "http" in bare
+                    or "www." in bare
                 ):
                     remarks.append((*target, "INVALID"))
                 else:
@@ -1262,6 +1265,8 @@ def check_mapping():
         raise RuntimeError("obvious foreign cities must be recognized")
     if not _is_foreign_place("Nigeria") or not _is_foreign_place("Makurdi") or not _is_foreign_place("Port Harcourt, Nigeria"):
         raise RuntimeError("Nigeria locations must be recognized as foreign")
+    if not _is_foreign_place("Vietnam"):
+        raise RuntimeError("Vietnam must be recognized as foreign")
     if match_place("Taytay Rizql") != match_place("Taytay, Rizal"):
         raise RuntimeError("Taytay Rizql must match Taytay, Rizal")
     if _is_foreign_place("Cagayan de Oro") or _is_foreign_place("Quezon City"):
