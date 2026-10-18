@@ -140,6 +140,7 @@ _PLACE_REWRITES = (
         ("n samar", "northern samar"),
         ("rizql", "rizal"),
         ("dava", "davao"),
+        ("bulakan", "bulacan"),
     )
 
 
@@ -272,6 +273,9 @@ def _choose_label(sheet, direct, found):
         if _is_city_label(psgc) and not _is_city_label(direct):
             if psgc_norm and direct_norm.startswith(psgc_norm + " "):
                 return direct
+            return psgc
+        # "San Juan, Abra" names the province. Do not keep the NCR city.
+        if not _is_city_label(psgc) and _is_city_label(direct) and _phrase_in_place(sheet, psgc_norm):
             return psgc
         if len(direct_norm) >= len(psgc_norm):
             return direct
@@ -1131,6 +1135,8 @@ def check_mapping():
         "Santa Rosa, Laguna": "Laguna",
         "San Juan, Metro Manila": "City of San Juan",
         "San Juan, Batangas": "Batangas",
+        "San Juan, Abra": "Abra",
+        "Bulakan": "Bulacan",
         "Hagonoy, Bulacan": "Bulacan",
         "Hagonoy, Davao del Sur": "Davao del Sur",
         "Rosario, Batangas": "Batangas",
