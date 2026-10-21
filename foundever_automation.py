@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta
 import gspread
 import requests
 from google.oauth2.service_account import Credentials
+from gspread.exceptions import APIError
 from gspread.utils import rowcol_to_a1
 
 from philippine_places import BARE_CITY_CORES, norm_place, resolve_place
@@ -18,6 +19,15 @@ from philippine_places import BARE_CITY_CORES, norm_place, resolve_place
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1NoRX955F0dpxMReiC-6lcd3hgxFDccS3H9hzabTQghE/edit"
 SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "service_account.json")
 TARGET_TABS = ["MODERN TRACTION", "JOBSTREET", "VALID CONSENT - TP, FVR & EXL", "MYNIMO"]
+# Direct Foundever applications. No preference or agreement gate.
+# Stamp the Foundever column only. Do not write partner columns such as EXL or CNX.
+DIRECT_APPLY_SOURCES = [
+    ("1VCTneWcGi78Ce2hQGhYOnB2lUK8Pj5sYCNN30Cr9vqU", "Foundever - Cebu City"),
+    ("1VCTneWcGi78Ce2hQGhYOnB2lUK8Pj5sYCNN30Cr9vqU", "Foundever - Tarlac"),
+    ("1PYPebwsRPiO8y7ogsMegRpSFmR3E84gGPnJohcjm04o", "EXL - Cebu City"),
+]
+# Foundever remarks that are not a real application and must not block a duplicate.
+_NON_BLOCKING_REMARKS = {"executive team / n", "invalid", "no", "n"}
 GQL = "https://backend.makipeople.com/v1/graphql"
 MANILA_INVITATION = "1935866c-ed92-42cd-8ef8-7308dc96048c"
 RUN_LOG = os.path.expanduser("~/.config/fvrolympuz/foundever_run.jsonl")
@@ -816,6 +826,58 @@ def find_header(headers, predicate):
     return None
 
 
+def email_column(headers):
+    """Candidate email column.
+
+    Earn-workbook tabs keep a character-reference Email Address beside the
+    candidate Email column. Use the plain Email column when both exist.
+    A lone Email Address is the candidate email.
+    """
+    matches = []
+    for index, header in enumerate(headers):
+        label = header.strip().lower()
+        if "email" in label:
+            matches.append((index, label))
+    if not matches:
+        return None
+    plain = [
+        index
+        for index, label in matches
+        if "address" not in label and "character" not in label and "reference" not in label
+    ]
+    if plain:
+        return plain[0]
+    candidate = [
+        index
+        for index, label in matches
+        if "character" not in label and "reference" not in label
+    ]
+    return candidate[0] if candidate else None
+
+
+def remark_sheet_key(spreadsheet_id, title):
+    """Writes are grouped by workbook id and tab so shared titles cannot collide."""
+    return (spreadsheet_id, title)
+
+
+def _sheets_call(action):
+    last_error = None
+    for attempt in range(4):
+        try:
+            return action()
+        except APIError as exc:
+            last_error = exc
+            if exc.code != 429 or attempt == 3:
+                raise
+            print("Sheets read quota reached. Waiting 65 seconds.")
+            time.sleep(65)
+    raise last_error
+
+
+def _cell(row, index):
+    return row[index].strip() if index is not None and index < len(row) else ""
+
+
 def _looks_like_phone(value):
     digits = re.sub(r"\D", "", str(value or ""))
     if digits.startswith("63") and len(digits) >= 12:
@@ -873,26 +935,53 @@ def preference_column(headers, rows):
 def setup_gspread():
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
-    return gspread.authorize(creds).open_by_url(SHEET_URL)
+    return gspread.authorize(creds)
 
 
-def load_candidates(doc):
-    existing = set()
+def _identity_keys(email, phone, full_name):
+    keys = []
+    if email:
+        keys.append(("email", email.lower()))
+    if phone:
+        keys.append(("phone", phone))
+    if full_name:
+        keys.append(("name", full_name))
+    return keys
+
+
+def _remember_application(existing, email, phone, full_name):
+    for key in _identity_keys(email, phone, full_name):
+        existing.add(key)
+
+
+def load_candidates(client):
     ready = []
     remarks = []
     skipped = []
     today = date.today()
+    parsed = []
+    books = {}
 
-    for sheet_name in TARGET_TABS:
-        worksheet = doc.worksheet(sheet_name)
-        data = worksheet.get_all_values()
+    def book_for(spreadsheet_id):
+        if spreadsheet_id not in books:
+            books[spreadsheet_id] = _sheets_call(lambda sid=spreadsheet_id: client.open_by_key(sid))
+        return books[spreadsheet_id]
+
+    main = _sheets_call(lambda: client.open_by_url(SHEET_URL))
+    books[main.id] = main
+    queued = [(main, sheet_name, False) for sheet_name in TARGET_TABS]
+    for spreadsheet_id, title in DIRECT_APPLY_SOURCES:
+        queued.append((book_for(spreadsheet_id), title, True))
+
+    for book, sheet_name, direct in queued:
+        worksheet = _sheets_call(lambda name=sheet_name, doc=book: doc.worksheet(name))
+        data = _sheets_call(lambda ws=worksheet: ws.get_all_values())
         if not data:
             continue
         headers = [header.strip() for header in data[0]]
-        lowered = [header.lower() for header in headers]
         fvr_idx = find_header(headers, lambda h: h in {"foundever", "fvr"})
         pref_idx = preference_column(headers, data)
-        email_idx = find_header(headers, lambda h: "email" in h and "address" not in h)
+        email_idx = email_column(headers)
         phone_idx = phone_column(headers, data)
         first_idx = find_header(headers, lambda h: h == "first name")
         last_idx = find_header(headers, lambda h: h == "last name")
@@ -906,61 +995,94 @@ def load_candidates(doc):
         if sheet_name == "MYNIMO" and agree_idx is None:
             raise RuntimeError("MYNIMO is missing the agreement column")
         required = {
-            "foundever": fvr_idx, "preference": pref_idx, "email": email_idx, "phone": phone_idx,
+            "foundever": fvr_idx, "email": email_idx, "phone": phone_idx,
             "first": first_idx, "last": last_idx, "city": city_idx, "birthdate": dob_idx,
             "bpo": bpo_idx, "education": edu_idx,
         }
+        if not direct:
+            required["preference"] = pref_idx
         missing = [name for name, index in required.items() if index is None]
         if missing:
             raise RuntimeError(f"{sheet_name} is missing columns: {', '.join(missing)}")
+        label = f"{worksheet.spreadsheet.title} / {sheet_name}"
+        shown_pref = "(none)" if pref_idx is None else headers[pref_idx]
         print(
-            f"{sheet_name}: preference={headers[pref_idx]!r} phone={headers[phone_idx]!r} "
-            f"city={headers[city_idx]!r} education={headers[edu_idx]!r}"
+            f"{label}: preference={shown_pref!r} phone={headers[phone_idx]!r} "
+            f"city={headers[city_idx]!r} education={headers[edu_idx]!r} email={headers[email_idx]!r}"
         )
+        parsed.append({
+            "worksheet": worksheet,
+            "tab": sheet_name,
+            "label": label,
+            "direct": direct,
+            "data": data,
+            "fvr_idx": fvr_idx,
+            "pref_idx": pref_idx,
+            "email_idx": email_idx,
+            "phone_idx": phone_idx,
+            "first_idx": first_idx,
+            "last_idx": last_idx,
+            "city_idx": city_idx,
+            "dob_idx": dob_idx,
+            "bpo_idx": bpo_idx,
+            "edu_idx": edu_idx,
+            "agree_idx": agree_idx,
+        })
 
-        def cell(row, index):
-            return row[index].strip() if index < len(row) else ""
+    # Real Foundever applications on every workbook block a later blank row.
+    existing = set()
+    for ctx in parsed:
+        for row in ctx["data"][1:]:
+            remark = _cell(row, ctx["fvr_idx"])
+            if not remark or remark.strip().lower() in _NON_BLOCKING_REMARKS:
+                continue
+            _remember_application(
+                existing,
+                _cell(row, ctx["email_idx"]),
+                phone_key(_cell(row, ctx["phone_idx"])),
+                f"{_cell(row, ctx['first_idx'])} {_cell(row, ctx['last_idx'])}".strip().lower(),
+            )
 
-        for row_number, row in enumerate(data[1:], start=2):
-            remark = cell(row, fvr_idx)
-            email = cell(row, email_idx).lower()
-            phone = phone_key(cell(row, phone_idx))
-            full_name = f"{cell(row, first_idx)} {cell(row, last_idx)}".strip().lower()
+    for ctx in parsed:
+        worksheet = ctx["worksheet"]
+        label = ctx["label"]
+        pref_idx = ctx["pref_idx"]
+        agree_idx = ctx["agree_idx"]
+        for row_number, row in enumerate(ctx["data"][1:], start=2):
+            remark = _cell(row, ctx["fvr_idx"])
+            email = _cell(row, ctx["email_idx"]).lower()
+            phone = phone_key(_cell(row, ctx["phone_idx"]))
+            full_name = f"{_cell(row, ctx['first_idx'])} {_cell(row, ctx['last_idx'])}".strip().lower()
             if remark:
-                # A not-interested or invalid row is not an existing Foundever application.
-                if remark.strip().lower() not in {"executive team / n", "invalid", "no", "n"}:
-                    if email:
-                        existing.add(("email", email))
-                    if phone:
-                        existing.add(("phone", phone))
-                    if full_name:
-                        existing.add(("name", full_name))
                 continue
-            if not cell(row, first_idx) and not cell(row, last_idx) and not email:
+            if not _cell(row, ctx["first_idx"]) and not _cell(row, ctx["last_idx"]) and not email:
                 continue
-            preference = cell(row, pref_idx).lower()
-            interested = "foundever" in preference or "all of the above" in preference
-            target = (worksheet, row_number, fvr_idx + 1)
+            if pref_idx is None:
+                interested = ctx["direct"]
+            else:
+                preference = _cell(row, pref_idx).lower()
+                interested = "foundever" in preference or "all of the above" in preference
+            target = (worksheet, row_number, ctx["fvr_idx"] + 1)
             if not interested:
                 remarks.append((*target, "Executive Team / N"))
                 continue
-            if agree_idx is not None and "agree" not in cell(row, agree_idx).lower():
-                skipped.append((sheet_name, row_number, "missing agreement", cell(row, agree_idx)))
+            if agree_idx is not None and "agree" not in _cell(row, agree_idx).lower():
+                skipped.append((label, row_number, "missing agreement", _cell(row, agree_idx)))
                 continue
             record = {
                 "worksheet": worksheet,
-                "sheet": sheet_name,
+                "sheet": label,
                 "row": row_number,
-                "col": fvr_idx + 1,
-                "first_name": cell(row, first_idx),
-                "last_name": cell(row, last_idx),
-                "email": cell(row, email_idx),
-                "phone": cell(row, phone_idx),
-                "city": cell(row, city_idx),
-                "pref": cell(row, pref_idx),
-                "dob": cell(row, dob_idx),
-                "bpo": cell(row, bpo_idx),
-                "edu": cell(row, edu_idx),
+                "col": ctx["fvr_idx"] + 1,
+                "first_name": _cell(row, ctx["first_idx"]),
+                "last_name": _cell(row, ctx["last_idx"]),
+                "email": _cell(row, ctx["email_idx"]),
+                "phone": _cell(row, ctx["phone_idx"]),
+                "city": _cell(row, ctx["city_idx"]),
+                "pref": "" if pref_idx is None else _cell(row, pref_idx),
+                "dob": _cell(row, ctx["dob_idx"]),
+                "bpo": _cell(row, ctx["bpo_idx"]),
+                "edu": _cell(row, ctx["edu_idx"]),
             }
             if not record["last_name"]:
                 parts = record["first_name"].split()
@@ -969,19 +1091,14 @@ def load_candidates(doc):
                     record["first_name"] = " ".join(parts[:-1])
             valid_email = validate_email(record["email"])
             if not valid_email:
-                skipped.append((sheet_name, row_number, "invalid email", record["email"]))
+                skipped.append((label, row_number, "invalid email", record["email"]))
                 continue
             record["email"] = valid_email
-            keys = [("email", valid_email.lower())]
-            if phone:
-                keys.append(("phone", phone))
-            if full_name:
-                keys.append(("name", full_name))
+            keys = _identity_keys(valid_email, phone, full_name)
             if any(key in existing for key in keys):
                 remarks.append((*target, "Existing Applicant"))
                 continue
-            for key in keys:
-                existing.add(key)
+            _remember_application(existing, valid_email, phone, full_name)
             if record["city"].strip().lower() in {"n/a", "na", "abroad"} or _is_foreign_place(record["city"]):
                 remarks.append((*target, "INVALID"))
                 continue
@@ -999,24 +1116,24 @@ def load_candidates(doc):
                 ):
                     remarks.append((*target, "INVALID"))
                 else:
-                    skipped.append((sheet_name, row_number, "unmatched city", record["city"]))
+                    skipped.append((label, row_number, "unmatched city", record["city"]))
                 continue
             birth = parse_dob(record["dob"])
             if not birth or not (16 <= age_on(birth, today) <= 100):
-                skipped.append((sheet_name, row_number, "unusable birthdate", record["dob"]))
+                skipped.append((label, row_number, "unusable birthdate", record["dob"]))
                 continue
             if age_on(birth, today) < 18:
-                skipped.append((sheet_name, row_number, "under 18", record["dob"]))
+                skipped.append((label, row_number, "under 18", record["dob"]))
                 continue
             local = local_phone(record["phone"])
             if not local:
-                skipped.append((sheet_name, row_number, "unusable phone", record["phone"]))
+                skipped.append((label, row_number, "unusable phone", record["phone"]))
                 continue
             if not map_education(record["edu"], birth.year):
-                skipped.append((sheet_name, row_number, "unmapped education", record["edu"]))
+                skipped.append((label, row_number, "unmapped education", record["edu"]))
                 continue
             if not map_bpo(record["bpo"]):
-                skipped.append((sheet_name, row_number, "unmapped bpo", record["bpo"]))
+                skipped.append((label, row_number, "unmapped bpo", record["bpo"]))
                 continue
             record["birth"] = birth
             record["local_phone"] = local
@@ -1030,23 +1147,29 @@ def write_remarks(items):
     grouped = defaultdict(list)
     sheets = {}
     for worksheet, row, col, value in items:
-        sheets[worksheet.title] = worksheet
-        grouped[worksheet.title].append({"range": rowcol_to_a1(row, col), "values": [[value]]})
-    for title, cells in grouped.items():
+        key = remark_sheet_key(worksheet.spreadsheet.id, worksheet.title)
+        sheets[key] = worksheet
+        grouped[key].append({"range": rowcol_to_a1(row, col), "values": [[value]]})
+    for key, cells in grouped.items():
+        worksheet = sheets[key]
+        label = f"{worksheet.spreadsheet.title} / {worksheet.title}"
         for offset in range(0, len(cells), 80):
             chunk = cells[offset:offset + 80]
             last_error = None
             for attempt in range(5):
                 try:
-                    sheets[title].batch_update(chunk)
+                    worksheet.batch_update(chunk)
                     last_error = None
                     break
+                except APIError as exc:
+                    last_error = exc
+                    time.sleep(65 if exc.code == 429 else 2 * (attempt + 1))
                 except Exception as exc:
                     last_error = exc
                     time.sleep(2 * (attempt + 1))
             if last_error:
                 raise last_error
-        print(f"Updated {len(cells)} Foundever cells on {title}.")
+        print(f"Updated {len(cells)} Foundever cells on {label}.")
 
 
 def append_log(entry):
@@ -1207,6 +1330,27 @@ def check_mapping():
         raise RuntimeError("vocational must map to some college")
     if "MYNIMO" not in TARGET_TABS:
         raise RuntimeError("MYNIMO must stay on the hourly Foundever run")
+    website_id = "1VCTneWcGi78Ce2hQGhYOnB2lUK8Pj5sYCNN30Cr9vqU"
+    for tab in ("Foundever - Cebu City", "Foundever - Tarlac"):
+        if (website_id, tab) not in DIRECT_APPLY_SOURCES:
+            raise RuntimeError(f"{tab} must stay on the hourly Foundever run")
+    hourly_tabs = set(TARGET_TABS) | {title for _, title in DIRECT_APPLY_SOURCES}
+    for tab in (
+        "Teleperformance - Quezon City",
+        "Concentrix - Taguig",
+        "Career Flex Modern",
+        "EXL - Cebu City",
+    ):
+        if tab in hourly_tabs:
+            raise RuntimeError(f"{tab} is not a Foundever source")
+    if email_column(["Email", "Email Address"]) != 0:
+        raise RuntimeError("a character-reference Email Address must not replace the candidate Email")
+    if email_column(["First Name", "Email Address"]) != 1:
+        raise RuntimeError("Email Address must count as the candidate email when it is the only email column")
+    if email_column(["Character Reference Email Address"]) is not None:
+        raise RuntimeError("a character-reference email address must stay ignored")
+    if remark_sheet_key("earn", "JOBSTREET") == remark_sheet_key("expense", "JOBSTREET"):
+        raise RuntimeError("Foundever writes must be keyed by spreadsheet id and tab title")
     if map_bpo("BPO 7 years")[1] != "Over 2 Years" or map_bpo("5yrs")[1] != "Over 2 Years":
         raise RuntimeError("multi-year BPO must map to Over 2 Years")
     if map_bpo("1 and half year BPO experience")[1] != "Over 1 Year":
@@ -1339,8 +1483,8 @@ def run_foundever_pipeline():
     dry = os.getenv("FOUNDEVER_DRY", "").strip() in {"1", "true", "yes"}
     limit_raw = os.getenv("FOUNDEVER_LIMIT", "").strip()
     limit = int(limit_raw) if limit_raw else None
-    doc = setup_gspread()
-    ready, remarks, skipped = load_candidates(doc)
+    client = setup_gspread()
+    ready, remarks, skipped = load_candidates(client)
     print(f"Ready {len(ready)}. Sheet remarks queued {len(remarks)}. Skipped {len(skipped)}.")
     skip_counts = defaultdict(int)
     for item in skipped:
@@ -1352,6 +1496,16 @@ def run_foundever_pipeline():
     for item in remarks:
         remark_counts[item[3]] += 1
     print("Remark summary:", dict(remark_counts))
+    for worksheet, row, _col, value in remarks:
+        if worksheet.title.startswith("Foundever -"):
+            print(f"New source remark {worksheet.spreadsheet.title} / {worksheet.title} row {row}: {value}")
+    for candidate in ready:
+        if " / Foundever -" in candidate["sheet"]:
+            print(
+                f"New source ready {candidate['sheet']} row {candidate['row']}: "
+                f"{candidate['first_name']} {candidate['last_name']} | {candidate['city']} -> {candidate['place'][0]} | "
+                f"{candidate['edu']} | {candidate['bpo']!r} | phone {candidate['local_phone']}"
+            )
     if dry:
         maki = Maki()
         for candidate in ready[:3]:
