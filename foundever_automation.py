@@ -24,7 +24,6 @@ TARGET_TABS = ["MODERN TRACTION", "JOBSTREET", "VALID CONSENT - TP, FVR & EXL", 
 DIRECT_APPLY_SOURCES = [
     ("1VCTneWcGi78Ce2hQGhYOnB2lUK8Pj5sYCNN30Cr9vqU", "Foundever - Cebu City"),
     ("1VCTneWcGi78Ce2hQGhYOnB2lUK8Pj5sYCNN30Cr9vqU", "Foundever - Tarlac"),
-    ("1PYPebwsRPiO8y7ogsMegRpSFmR3E84gGPnJohcjm04o", "EXL - Cebu City"),
 ]
 # Foundever remarks that are not a real application and must not block a duplicate.
 _NON_BLOCKING_REMARKS = {"executive team / n", "invalid", "no", "n"}
