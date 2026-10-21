@@ -24,6 +24,7 @@ TARGET_TABS = ["MODERN TRACTION", "JOBSTREET", "VALID CONSENT - TP, FVR & EXL", 
 DIRECT_APPLY_SOURCES = [
     ("1VCTneWcGi78Ce2hQGhYOnB2lUK8Pj5sYCNN30Cr9vqU", "Foundever - Cebu City"),
     ("1VCTneWcGi78Ce2hQGhYOnB2lUK8Pj5sYCNN30Cr9vqU", "Foundever - Tarlac"),
+    ("1PYPebwsRPiO8y7ogsMegRpSFmR3E84gGPnJohcjm04o", "EXL - Cebu City"),
 ]
 # Foundever remarks that are not a real application and must not block a duplicate.
 _NON_BLOCKING_REMARKS = {"executive team / n", "invalid", "no", "n"}
@@ -413,6 +414,7 @@ def map_education(edu, birth_year):
         text in {"college graduate", "college grad", "bachelor's degree", "bachelors degree", "bachelor graduate", "college education", "graduate"}
         or text.startswith("college graduate")
         or text.startswith("bachelor")
+        or re.search(r"\bb\.?\s*sc\b", text)
     ):
         return "Bachelor's degree or equivalent", "4th Year College level Completed", "Not Applicable"
     if "senor high" in text or "senior high" in text or "shs" in text or "grade 12" in text or (
@@ -1330,16 +1332,18 @@ def check_mapping():
     if "MYNIMO" not in TARGET_TABS:
         raise RuntimeError("MYNIMO must stay on the hourly Foundever run")
     website_id = "1VCTneWcGi78Ce2hQGhYOnB2lUK8Pj5sYCNN30Cr9vqU"
-    for tab in ("Foundever - Cebu City", "Foundever - Tarlac"):
-        if (website_id, tab) not in DIRECT_APPLY_SOURCES:
-            raise RuntimeError(f"{tab} must stay on the hourly Foundever run")
-    hourly_tabs = set(TARGET_TABS) | {title for _, title in DIRECT_APPLY_SOURCES}
-    for tab in (
-        "Teleperformance - Quezon City",
-        "Concentrix - Taguig",
-        "Career Flex Modern",
-        "EXL - Cebu City",
+    partners_id = "1PYPebwsRPiO8y7ogsMegRpSFmR3E84gGPnJohcjm04o"
+    for spreadsheet_id, tab in (
+        (website_id, "Foundever - Cebu City"),
+        (website_id, "Foundever - Tarlac"),
+        (partners_id, "EXL - Cebu City"),
     ):
+        if (spreadsheet_id, tab) not in DIRECT_APPLY_SOURCES:
+            raise RuntimeError(f"{tab} must stay on the hourly direct-apply run")
+    if map_education("B.sc computer science", 2000)[0] != "Bachelor's degree or equivalent":
+        raise RuntimeError("B.Sc must map to a bachelor's degree")
+    hourly_tabs = set(TARGET_TABS) | {title for _, title in DIRECT_APPLY_SOURCES}
+    for tab in ("Teleperformance - Quezon City", "Concentrix - Taguig", "Career Flex Modern"):
         if tab in hourly_tabs:
             raise RuntimeError(f"{tab} is not a Foundever source")
     if email_column(["Email", "Email Address"]) != 0:
