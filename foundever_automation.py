@@ -25,6 +25,7 @@ DIRECT_APPLY_SOURCES = [
     ("1VCTneWcGi78Ce2hQGhYOnB2lUK8Pj5sYCNN30Cr9vqU", "Foundever - Cebu City"),
     ("1VCTneWcGi78Ce2hQGhYOnB2lUK8Pj5sYCNN30Cr9vqU", "Foundever - Tarlac"),
     ("1VCTneWcGi78Ce2hQGhYOnB2lUK8Pj5sYCNN30Cr9vqU", "Concentrix - Taguig"),
+    ("1VCTneWcGi78Ce2hQGhYOnB2lUK8Pj5sYCNN30Cr9vqU", "Foundever - Mandaluyong Edsa"),
     ("1PYPebwsRPiO8y7ogsMegRpSFmR3E84gGPnJohcjm04o", "EXL - Cebu City"),
 ]
 # Foundever remarks that are not a real application and must not block a duplicate.
@@ -1338,6 +1339,7 @@ def check_mapping():
         (website_id, "Foundever - Cebu City"),
         (website_id, "Foundever - Tarlac"),
         (website_id, "Concentrix - Taguig"),
+        (website_id, "Foundever - Mandaluyong Edsa"),
         (partners_id, "EXL - Cebu City"),
     ):
         if (spreadsheet_id, tab) not in DIRECT_APPLY_SOURCES:
