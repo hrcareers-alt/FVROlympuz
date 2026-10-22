@@ -24,6 +24,7 @@ TARGET_TABS = ["MODERN TRACTION", "JOBSTREET", "VALID CONSENT - TP, FVR & EXL", 
 DIRECT_APPLY_SOURCES = [
     ("1VCTneWcGi78Ce2hQGhYOnB2lUK8Pj5sYCNN30Cr9vqU", "Foundever - Cebu City"),
     ("1VCTneWcGi78Ce2hQGhYOnB2lUK8Pj5sYCNN30Cr9vqU", "Foundever - Tarlac"),
+    ("1VCTneWcGi78Ce2hQGhYOnB2lUK8Pj5sYCNN30Cr9vqU", "Concentrix - Taguig"),
     ("1PYPebwsRPiO8y7ogsMegRpSFmR3E84gGPnJohcjm04o", "EXL - Cebu City"),
 ]
 # Foundever remarks that are not a real application and must not block a duplicate.
@@ -1336,6 +1337,7 @@ def check_mapping():
     for spreadsheet_id, tab in (
         (website_id, "Foundever - Cebu City"),
         (website_id, "Foundever - Tarlac"),
+        (website_id, "Concentrix - Taguig"),
         (partners_id, "EXL - Cebu City"),
     ):
         if (spreadsheet_id, tab) not in DIRECT_APPLY_SOURCES:
@@ -1343,7 +1345,7 @@ def check_mapping():
     if map_education("B.sc computer science", 2000)[0] != "Bachelor's degree or equivalent":
         raise RuntimeError("B.Sc must map to a bachelor's degree")
     hourly_tabs = set(TARGET_TABS) | {title for _, title in DIRECT_APPLY_SOURCES}
-    for tab in ("Teleperformance - Quezon City", "Concentrix - Taguig", "Career Flex Modern"):
+    for tab in ("Teleperformance - Quezon City", "Career Flex Modern"):
         if tab in hourly_tabs:
             raise RuntimeError(f"{tab} is not a Foundever source")
     if email_column(["Email", "Email Address"]) != 0:
