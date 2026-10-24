@@ -153,6 +153,7 @@ _PLACE_REWRITES = (
         ("rizql", "rizal"),
         ("dava", "davao"),
         ("bulakan", "bulacan"),
+        ("ccity", ""),
     )
 
 
@@ -1292,6 +1293,9 @@ def check_mapping():
         "Mandaue": "City of Mandaue",
         "Mandaue City": "City of Mandaue",
         "Tarlac City": "Tarlac",
+        "Samal": "Bataan",
+        "Island Garden City of Samal": "Davao del Norte",
+        "Island Garden Ccity of Samal": "Davao del Norte",
     }
     unresolved = [
         "Hagonoy", "San Fernando", "Rosario", "San Mateo", "Talisay", "Taytay",
