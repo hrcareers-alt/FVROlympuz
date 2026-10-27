@@ -152,6 +152,7 @@ _PLACE_REWRITES = (
         ("n samar", "northern samar"),
         ("rizql", "rizal"),
         ("dava", "davao"),
+        ("dabao", "davao"),
         ("bulakan", "bulacan"),
         ("ccity", ""),
     )
@@ -1296,6 +1297,7 @@ def check_mapping():
         "Samal": "Bataan",
         "Island Garden City of Samal": "Davao del Norte",
         "Island Garden Ccity of Samal": "Davao del Norte",
+        "Dabao City": "City of Davao",
     }
     unresolved = [
         "Hagonoy", "San Fernando", "Rosario", "San Mateo", "Talisay", "Taytay",
