@@ -303,7 +303,21 @@ class PlaceIndex:
                 unique_provinces.append(prov)
         prov_hits = unique_provinces
         if len(prov_hits) > 1:
-            return Resolve(ambiguous=True, blocked=True)
+            # "Isabela, Negros Occidental": Isabela is a town there, not a second province.
+            kept = None
+            for candidate in prov_hits:
+                others = [prov for prov in prov_hits if prov is not candidate]
+                if not others:
+                    continue
+                if all(
+                    any(mun.prov_code == candidate.code for mun in self.munis.get(norm_place(other.label), []))
+                    for other in others
+                ):
+                    kept = candidate
+                    break
+            if kept is None:
+                return Resolve(ambiguous=True, blocked=True)
+            prov_hits = [kept]
         province = prov_hits[0] if prov_hits else None
         occupied = list(prov_occupied)
         groups, mun_occupied = self._hits(words, self.munis, occupied, ncr_only=ncr_only)
