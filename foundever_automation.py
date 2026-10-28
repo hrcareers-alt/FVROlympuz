@@ -206,6 +206,8 @@ _FOREIGN_MARKERS = (
     "indonesia",
     "lagos",
     "onitsha",
+    "brunei",
+    "bandar seri",
 )
 
 
@@ -1439,6 +1441,8 @@ def check_mapping():
         raise RuntimeError("Indonesia locations must be recognized as foreign")
     if not _is_foreign_place("Lagos") or not _is_foreign_place("Onitsha"):
         raise RuntimeError("Lagos and Onitsha must be recognized as foreign")
+    if not _is_foreign_place("brunei bandar seri") or not _is_foreign_place("Brunei"):
+        raise RuntimeError("Brunei locations must be recognized as foreign")
     if match_place("Dava City") != match_place("Davao City"):
         raise RuntimeError("Dava City must match Davao City")
     if match_place("Taytay Rizql") != match_place("Taytay, Rizal"):
